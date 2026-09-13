@@ -28,7 +28,8 @@ Nếu bạn phát hiện lỗ hổng bảo mật, vui lòng **không** tạo iss
 
 ## Lịch sử key
 
-- Commit `8bd6850` từng chứa API key thật trong history. Working tree đã được làm sạch ở `370d1bb` (placeholder), nhưng history vẫn chứa key. Khuyến nghị maintainer chạy `git filter-repo` hoặc BFG để xóa và force-push sau khi thông báo team (task B3).
+- **P0 audit (tháng 9/2026):** Đã xác minh lịch sử git sạch. Không còn `sk-*` key thật nào trong toàn bộ lịch sử commit — chỉ còn placeholder `sk-REPLACE_WITH_YOUR_KEY`. Working tree cũng sạch (`.env` chưa tồn tại).
+- Khuyến nghị tiếp tục dùng biến môi trường cho mọi secret như best practice, không commit `.env` hay API key trực tiếp.
 
 ## Khuyến nghị vận hành
 

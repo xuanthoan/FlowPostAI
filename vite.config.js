@@ -14,6 +14,24 @@ export default defineConfig({
   },
   envPrefix: ['VITE_', 'TAURI_'],
   build: {
-    target: 'esnext'
+    target: 'esnext',
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/react-dom') || id.includes('node_modules/react/')) {
+            return 'vendor-react';
+          }
+          if (id.includes('node_modules/recharts') || id.includes('node_modules/d3-')) {
+            return 'vendor-charts';
+          }
+          if (id.includes('node_modules/lucide-react')) {
+            return 'vendor-icons';
+          }
+          if (id.includes('node_modules/')) {
+            return 'vendor-misc';
+          }
+        }
+      }
+    }
   }
 })
