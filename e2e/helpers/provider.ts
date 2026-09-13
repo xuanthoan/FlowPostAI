@@ -5,6 +5,7 @@ export const DEFAULT_ID = 'custom-provider';
 export const DEFAULT_BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:20128/v1';
 export const DEFAULT_MODEL = process.env.E2E_MODEL || 'xoay-vong-worker-web-128k';
 export const DEFAULT_API_KEY = process.env.E2E_API_KEY || '';
+export const DEFAULT_PROTOCOL = process.env.E2E_PROTOCOL || 'openai-completions';
 
 export async function ensureProvider(
   page: Page,
@@ -26,7 +27,7 @@ export async function ensureProvider(
       payload: {
         displayName: 'Custom provider',
         baseUrl,
-        protocol: 'openai-completions',
+        protocol: DEFAULT_PROTOCOL,
         models,
         apiKey,
       },
@@ -40,7 +41,7 @@ export async function ensureProvider(
           id,
           displayName: 'Custom provider',
           baseUrl,
-          protocol: 'openai-completions',
+          protocol: DEFAULT_PROTOCOL,
           models,
           apiKey,
         },
