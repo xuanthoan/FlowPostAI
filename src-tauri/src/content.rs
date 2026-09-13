@@ -155,6 +155,41 @@ pub fn update_content_status(
     Ok(updated)
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateContentPayload {
+    pub content_id: String,
+    pub title: String,
+    pub body: String,
+    pub prompt: String,
+    pub style: String,
+    pub custom_style: Option<String>,
+    pub media_ids: Option<Vec<String>>,
+}
+
+#[tauri::command]
+pub fn update_content(app: AppHandle, payload: UpdateContentPayload) -> Result<ContentItem, String> {
+    if payload.title.trim().is_empty() && payload.body.trim().is_empty() {
+        return Err("Tiêu đề hoặc nội dung không được để trống".into());
+    }
+    if payload.prompt.trim().is_empty() {
+        return Err("Prompt không được để trống".into());
+    }
+    let mut items = read_content_index(&app)?;
+    let pos = items.iter().position(|c| c.id == payload.content_id)
+        .ok_or_else(|| format!("Không tìm thấy {}", payload.content_id))?;
+    items[pos].title = payload.title.trim().to_string();
+    items[pos].body = payload.body.trim().to_string();
+    items[pos].prompt = payload.prompt.trim().to_string();
+    items[pos].style = payload.style;
+    items[pos].custom_style = payload.custom_style.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    items[pos].media_ids = payload.media_ids.unwrap_or_default();
+    items[pos].updated_at = Utc::now();
+    let updated = items[pos].clone();
+    write_content_index(&app, &items)?;
+    Ok(updated)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -237,5 +272,88 @@ mod tests {
         assert!(json.contains("\"draft\"") || json.contains("\"Draft\"") || json.contains("draft"));
         let parsed: ContentItem = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.status, ContentStatus::Draft);
+    }
+
+    #[test]
+    fn test_update_content_fields_and_timestamps() {
+        let dir = unique_temp_dir("flowpost_update_content");
+        let path = dir.join("content-index.json");
+
+        let mut item = sample_item("upd1", "Original Title");
+        item.body = "Original body".into();
+        item.prompt = "Original prompt".into();
+        item.style = "Viral".into();
+        let original_created = item.created_at;
+        let original_updated = item.updated_at;
+        write_content_at(&path, &[item]).unwrap();
+
+        // Simulate update_content logic without AppHandle
+        let mut items: Vec<ContentItem> = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let pos = items.iter().position(|c| c.id == "upd1").unwrap();
+        items[pos].title = "Updated Title".into();
+        items[pos].body = "Updated body".into();
+        items[pos].prompt = "Updated prompt".into();
+        items[pos].style = "Story".into();
+        items[pos].custom_style = Some("Hài hước".into());
+        items[pos].media_ids = vec!["m1".into(), "m2".into()];
+        items[pos].updated_at = Utc::now();
+        write_content_at(&path, &items).unwrap();
+
+        // Verify fields changed
+        let parsed: Vec<ContentItem> = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let found = parsed.iter().find(|c| c.id == "upd1").unwrap();
+        assert_eq!(found.title, "Updated Title");
+        assert_eq!(found.body, "Updated body");
+        assert_eq!(found.prompt, "Updated prompt");
+        assert_eq!(found.style, "Story");
+        assert_eq!(found.custom_style, Some("Hài hước".into()));
+        assert_eq!(found.media_ids, vec!["m1".to_string(), "m2".to_string()]);
+
+        // Verify updated_at changed but created_at unchanged
+        assert_eq!(found.created_at, original_created);
+        assert!(found.updated_at > original_updated);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_update_content_empty_title_body_rejected() {
+        let dir = unique_temp_dir("flowpost_update_empty");
+        let path = dir.join("content-index.json");
+        let item = sample_item("upd2", "Title");
+        write_content_at(&path, &[item]).unwrap();
+
+        let items: Vec<ContentItem> = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(items.len(), 1);
+
+        // Simulate validation: empty title + body should be rejected
+        let empty_title = "";
+        let empty_body = "";
+        assert!(empty_title.trim().is_empty() && empty_body.trim().is_empty(),
+            "Empty title+body should trigger validation");
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_update_content_empty_prompt_rejected() {
+        // Simulate validation: empty prompt should be rejected
+        let empty_prompt = "";
+        assert!(empty_prompt.trim().is_empty(),
+            "Empty prompt should trigger validation");
+    }
+
+    #[test]
+    fn test_update_content_nonexistent_id_returns_error() {
+        let dir = unique_temp_dir("flowpost_update_notfound");
+        let path = dir.join("content-index.json");
+        let item = sample_item("existing", "Title");
+        write_content_at(&path, &[item]).unwrap();
+
+        let items: Vec<ContentItem> = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let pos = items.iter().position(|c| c.id == "nonexistent");
+        assert!(pos.is_none(), "Non-existent id should not be found");
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

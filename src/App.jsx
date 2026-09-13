@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { LayoutDashboard, Sparkles, Images, CalendarDays, Send, BarChart3, Settings, Search, Bell, TrendingUp, FileText, Heart, MessageCircle, Plus, Clock3, CircleCheck, MoreHorizontal, WandSparkles, Zap, Upload, HardDrive, Film, Trash2, RefreshCw, X } from 'lucide-react'
+import { LayoutDashboard, Sparkles, Images, CalendarDays, Send, BarChart3, Settings, Search, TrendingUp, FileText, Heart, MessageCircle, Plus, Clock3, CircleCheck, MoreHorizontal, WandSparkles, Zap, Upload, HardDrive, Film, Trash2, RefreshCw, X, Pencil } from 'lucide-react'
 import { invokeDesktop, isDesktop, localAssetUrl } from './tauri.js'
 
 function weekdayLabel(date) {
@@ -654,6 +654,7 @@ function ContentWarehousePage() {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [scheduleFor, setScheduleFor] = useState(null)
+  const [editing, setEditing] = useState(null)
 
   const refresh = async () => {
     if (!desktop) return
@@ -710,9 +711,35 @@ function ContentWarehousePage() {
         <button className="outline" onClick={()=>approve(it.id)} disabled={it.status==='Approved' || busy} style={{height:30, fontSize:13}}><CircleCheck size={12}/> Duyệt</button>
         <button className="primary" onClick={()=>setScheduleFor(it.id)} disabled={it.status!=='Approved' || busy} title={it.status!=='Approved' ? 'Hãy duyệt trước' : ''} style={{height:30, fontSize:13}}><CalendarDays size={12}/> Lên lịch</button>
         <button className="outline" onClick={()=>remove(it.id)} disabled={busy} style={{height:30, fontSize:13}}><Trash2 size={12}/> Xóa</button>
+        <button className="outline" onClick={()=>setEditing({...it})} disabled={busy} style={{height:30, fontSize:13}}><Pencil size={12}/> Sửa</button>
       </div>
     </article>)}</div> : <div className="media-empty"><div><FileText size={34}/></div><h2>{items.length===0 ? 'Kho nội dung đang trống' : 'Không có kết quả'}</h2><p>{items.length===0 ? 'Hãy tạo nội dung ở AI Content và Lưu vào kho.' : 'Thử đổi bộ lọc hoặc từ khóa.'}</p></div>}
     {scheduleFor && <ScheduleModal contentId={scheduleFor} onClose={()=>setScheduleFor(null)} onCreated={refresh} />}
+    {editing && <div className="modal-overlay" onClick={()=>setEditing(null)} style={{position:'fixed', inset:0, background:'#0008', display:'grid', placeItems:'center', zIndex:50}}>
+      <div className="modal" onClick={e=>e.stopPropagation()} style={{maxWidth:600, width:'90%', background:'#fff', borderRadius:12, padding:20, boxShadow:'0 8px 30px rgba(0,0,0,.2)'}}>
+        <h2 style={{margin:0, fontSize:17}}>Sửa nội dung</h2>
+        <div style={{display:'flex', flexDirection:'column', gap:10, marginTop:14}}>
+          <input value={editing.title} onChange={e=>setEditing({...editing, title:e.target.value})} placeholder="Tiêu đề" style={{padding:'8px 10px', border:'1px solid #e2e1e7', borderRadius:8, fontSize:14}}/>
+          <textarea value={editing.body} onChange={e=>setEditing({...editing, body:e.target.value})} placeholder="Nội dung" rows={5} style={{padding:'8px 10px', border:'1px solid #e2e1e7', borderRadius:8, fontSize:14, resize:'vertical'}}/>
+          <input value={editing.prompt} onChange={e=>setEditing({...editing, prompt:e.target.value})} placeholder="Prompt" style={{padding:'8px 10px', border:'1px solid #e2e1e7', borderRadius:8, fontSize:14}}/>
+          <div style={{display:'flex', gap:8, justifyContent:'flex-end', marginTop:10}}>
+            <button className="outline" onClick={()=>setEditing(null)} style={{height:34}}>Hủy</button>
+            <button className="primary" onClick={async () => {
+              if (!editing.title.trim() && !editing.body.trim()) { setErr('Tiêu đề hoặc nội dung không được để trống'); return }
+              if (!editing.prompt.trim()) { setErr('Prompt không được để trống'); return }
+              setBusy(true); setErr('')
+              try {
+                await invokeDesktop('update_content', {
+                  contentId: editing.id, title: editing.title, body: editing.body,
+                  prompt: editing.prompt, style: editing.style, customStyle: editing.customStyle || null
+                })
+                setEditing(null); await refresh()
+              } catch (e) { setErr(String(e)) } finally { setBusy(false) }
+            }} style={{height:34}}>Lưu</button>
+          </div>
+        </div>
+      </div>
+    </div>}
   </section>
 }
 
@@ -843,7 +870,7 @@ function SchedulePage() {
       {filteredSchedules.length ? <div className="table-wrap"><table><thead><tr><th>THỜI GIAN</th><th>NỘI DUNG</th><th>TRANG</th><th>TRẠNG THÁI</th><th></th></tr></thead><tbody>{filteredSchedules.map(s => {
         const c = contentMap.get(s.contentId)
         const isScheduled = s.status === 'Scheduled'
-        return <tr key={s.id}><td>{formatFull(s.scheduledAt)}</td><td><strong style={{fontSize:14}}>{c ? c.title : s.contentId}</strong><div style={{fontSize:12, color:'#777'}}>{c ? c.prompt.slice(0,40) : ''}</div></td><td><span style={{fontSize:13, background:'#f0eefc', padding:'3px 7px', borderRadius:10}}>{s.platform}</span></td><td><span style={{fontSize:12, padding:'3px 7px', borderRadius:10, background: s.status==='Scheduled' ? '#fff3cd' : s.status==='Published' ? '#e8f5e9' : s.status==='Failed' ? '#fdecea' : '#e8e8e8', color: s.status==='Scheduled' ? '#664d03' : s.status==='Published' ? '#2e7d32' : s.status==='Cancelled' ? '#555' : '#611a15'}}>{s.status}</span></td><td><div style={{display:'flex', gap:4}}><button className="outline" onClick={()=>openReschedule(s)} disabled={!isScheduled || busy} title={isScheduled ? '' : 'Chỉ lịch Scheduled mới dời được'} style={{height:30, fontSize:12}}><CalendarDays size={11}/> Dời</button><button className="outline" onClick={()=>cancelItem(s.id)} disabled={!isScheduled || busy} title={isScheduled ? '' : 'Chỉ lịch Scheduled mới hủy được'} style={{height:30, fontSize:12}}><X size={11}/> Hủy</button><button className="outline" onClick={()=>deleteItem(s.id)} style={{height:30, fontSize:13}}><Trash2 size={12}/> Xóa</button></div></td></tr>
+        return <tr key={s.id}><td>{formatFull(s.scheduledAt)}</td><td><strong style={{fontSize:14}}>{c ? c.title : s.contentId}</strong><div style={{fontSize:12, color:'#777'}}>{c ? c.prompt.slice(0,40) : ''}</div></td><td><span style={{fontSize:13, background:'#f0eefc', padding:'3px 7px', borderRadius:10}}>{s.platform}</span></td><td><span style={{fontSize:12, padding:'3px 7px', borderRadius:10, background: s.status==='Scheduled' ? '#fff3cd' : s.status==='Published' ? '#e8f5e9' : s.status==='Failed' ? '#fdecea' : '#e8e8e8', color: s.status==='Scheduled' ? '#664d03' : s.status==='Published' ? '#2e7d32' : s.status==='Cancelled' ? '#555' : '#611a15'}}>{s.status}</span>{s.status === 'Failed' && s.lastError && <div style={{fontSize:11, color:'#c62828', marginTop:4, maxWidth:200, wordBreak:'break-word'}}>{s.lastError} (lần {s.retryCount || 0}/3)</div>}</td><td><div style={{display:'flex', gap:4}}><button className="outline" onClick={()=>openReschedule(s)} disabled={!isScheduled || busy} title={isScheduled ? '' : 'Chỉ lịch Scheduled mới dời được'} style={{height:30, fontSize:12}}><CalendarDays size={11}/> Dời</button><button className="outline" onClick={()=>cancelItem(s.id)} disabled={!isScheduled || busy} title={isScheduled ? '' : 'Chỉ lịch Scheduled mới hủy được'} style={{height:30, fontSize:12}}><X size={11}/> Hủy</button><button className="outline" onClick={()=>deleteItem(s.id)} style={{height:30, fontSize:13}}><Trash2 size={12}/> Xóa</button>{s.status === 'Failed' && <button className="outline" onClick={async () => { if (!window.confirm('Thử lại lịch này?')) return; try { await invokeDesktop('retry_schedule', { scheduleId: s.id }); await refresh() } catch (e) { setErr(String(e)) } }} disabled={busy} style={{height:30, fontSize:12}}><RefreshCw size={11}/> Thử lại</button>}</div></td></tr>
       })}</tbody></table></div> : <div className="media-empty" style={{padding:30}}><div><CalendarDays size={34}/></div><h2>Chưa có lịch nào</h2><p>Hãy duyệt nội dung ở Kho và bấm Lên lịch.</p></div>}
     </div>}
       {rescheduleFor && <div style={{position:'fixed', inset:0, background:'#0006', display:'grid', placeItems:'center', zIndex:55}} onClick={()=>setRescheduleFor(null)}>
@@ -1026,7 +1053,7 @@ function App() {
     </aside>
 
     <main>
-      <header><div className="search"><Search size={18}/><input aria-label="Tìm kiếm" placeholder="Tìm kiếm nội dung, bài viết..."/><kbd>⌘ K</kbd></div><div className="head-actions"><button className="bell" aria-label="Thông báo"><Bell size={20}/><i/></button><button className="primary" onClick={createPost}><Plus size={19}/> Tạo nội dung mới</button></div></header>
+      <header><div className="search"><Search size={18}/><input aria-label="Tìm kiếm" placeholder="Tìm kiếm nội dung, bài viết..." disabled style={{opacity:0.6}}/></div><div className="head-actions"><button className="primary" onClick={createPost}><Plus size={19}/> Tạo nội dung mới</button></div></header>
       <div className="content">
         {active === 'AI Content' ? <AiContentPage/> : active === 'Kho nội dung' ? <ContentWarehousePage/> : active === 'Thư viện media' ? <MediaLibrary/> : active === 'Lịch nội dung' ? <SchedulePage/> : active === 'Cài đặt' ? <SettingsPage/> : <>
         <section className="welcome"><div><p>{today}</p><h1>{getGreeting()}</h1><div className="welcome-sub">Hôm nay bạn có <b>{dashboardScheduled} bài viết</b> đang chờ được đăng.</div></div><button className="outline" onClick={()=>setActive('Lịch nội dung')}><CalendarDays size={17}/> Xem lịch nội dung</button></section>
