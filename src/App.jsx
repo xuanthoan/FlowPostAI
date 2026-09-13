@@ -731,7 +731,8 @@ function ContentWarehousePage() {
               try {
                 await invokeDesktop('update_content', {
                   contentId: editing.id, title: editing.title, body: editing.body,
-                  prompt: editing.prompt, style: editing.style, customStyle: editing.customStyle || null
+                  prompt: editing.prompt, style: editing.style, customStyle: editing.customStyle || null,
+                  mediaIds: editing.mediaIds || []
                 })
                 setEditing(null); await refresh()
               } catch (e) { setErr(String(e)) } finally { setBusy(false) }
