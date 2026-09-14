@@ -141,7 +141,7 @@ fn max_tokens_for_length(length: Option<&str>) -> u32 {
 
 fn endpoint_for_protocol(base_url: &str, protocol: &str) -> String {
     match protocol {
-        "openai-responses" => format!("{}/responses", base_url),
+        "openai-responses" => base_url.to_string(),
         "anthropic-messages" => format!("{}/messages", base_url),
         _ => format!("{}/chat/completions", base_url),
     }
@@ -449,7 +449,7 @@ mod tests {
     #[test]
     fn test_endpoint_for_protocol() {
         assert_eq!(endpoint_for_protocol("http://localhost:20128/v1", "openai-completions"), "http://localhost:20128/v1/chat/completions");
-        assert_eq!(endpoint_for_protocol("http://localhost:20128/v1", "openai-responses"), "http://localhost:20128/v1/responses");
+        assert_eq!(endpoint_for_protocol("http://localhost:20128/v1", "openai-responses"), "http://localhost:20128/v1");
         assert_eq!(endpoint_for_protocol("http://localhost:20128/v1", "anthropic-messages"), "http://localhost:20128/v1/messages");
         assert_eq!(endpoint_for_protocol("https://api.anthropic.com/v1", "anthropic-messages"), "https://api.anthropic.com/v1/messages");
         assert_eq!(endpoint_for_protocol("https://api.openai.com/v1", "unknown"), "https://api.openai.com/v1/chat/completions");
