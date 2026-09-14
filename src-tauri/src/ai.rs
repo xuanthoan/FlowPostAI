@@ -3,7 +3,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Runtime};
 use std::time::Duration;
 
-const AI_TIMEOUT_SECS: u64 = 15;
+const AI_TIMEOUT_SECS: u64 = 60;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -139,12 +139,9 @@ fn max_tokens_for_length(length: Option<&str>) -> u32 {
     }
 }
 
-fn endpoint_for_protocol(base_url: &str, protocol: &str) -> String {
-    match protocol {
-        "openai-responses" => format!("{}/responses", base_url),
-        "anthropic-messages" => format!("{}/messages", base_url),
-        _ => format!("{}/chat/completions", base_url),
-    }
+fn endpoint_for_protocol(base_url: &str, _protocol: &str) -> String {
+    // Server has a single endpoint — protocol only affects request/response format, not URL
+    base_url.to_string()
 }
 
 async fn call_ai_provider(
@@ -220,7 +217,11 @@ async fn call_ai_provider(
         .body(body)
         .send()
         .await
-        .map_err(|e| format!("Không thể kết nối AI provider: {}", e))?;
+        .map_err(|e| {
+            let url_str = url.clone();
+            eprintln!("[FlowPost AI] AI request failed: url={} error={:#}", url_str, e);
+            format!("Không thể kết nối AI provider: {} (url: {})", e, url_str)
+        })?;
 
     let status = resp.status().as_u16();
     let response_body = resp.text().await.map_err(|e| e.to_string())?;
@@ -448,11 +449,12 @@ mod tests {
 
     #[test]
     fn test_endpoint_for_protocol() {
-        assert_eq!(endpoint_for_protocol("http://localhost:20128/v1", "openai-completions"), "http://localhost:20128/v1/chat/completions");
-        assert_eq!(endpoint_for_protocol("http://localhost:20128/v1", "openai-responses"), "http://localhost:20128/v1/responses");
-        assert_eq!(endpoint_for_protocol("http://localhost:20128/v1", "anthropic-messages"), "http://localhost:20128/v1/messages");
-        assert_eq!(endpoint_for_protocol("https://api.anthropic.com/v1", "anthropic-messages"), "https://api.anthropic.com/v1/messages");
-        assert_eq!(endpoint_for_protocol("https://api.openai.com/v1", "unknown"), "https://api.openai.com/v1/chat/completions");
+        // All protocols use the same endpoint — protocol only affects request/response format
+        assert_eq!(endpoint_for_protocol("http://localhost:20128/v1", "openai-completions"), "http://localhost:20128/v1");
+        assert_eq!(endpoint_for_protocol("http://localhost:20128/v1", "openai-responses"), "http://localhost:20128/v1");
+        assert_eq!(endpoint_for_protocol("http://localhost:20128/v1", "anthropic-messages"), "http://localhost:20128/v1");
+        assert_eq!(endpoint_for_protocol("https://api.anthropic.com/v1", "anthropic-messages"), "https://api.anthropic.com/v1");
+        assert_eq!(endpoint_for_protocol("https://api.openai.com/v1", "unknown"), "https://api.openai.com/v1");
     }
 
     #[test]
