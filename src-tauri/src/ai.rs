@@ -139,7 +139,7 @@ fn max_tokens_for_length(length: Option<&str>) -> u32 {
     }
 }
 
-// NOTE: base_url IS the full endpoint URL (e.g. "http://localhost:20128/v1/chat/completions").
+// NOTE: base_url IS the full endpoint URL (e.g. "http://127.0.0.1:20128/v1/chat/completions").
 // We do NOT append any suffix — different servers use different paths.
 
 async fn call_ai_provider(
@@ -199,6 +199,7 @@ async fn call_ai_provider(
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(AI_TIMEOUT_SECS))
+        .http1_only()
         .build()
         .map_err(|e| format!("Không thể khởi tạo HTTP client: {}", e))?;
 

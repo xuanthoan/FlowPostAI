@@ -83,13 +83,13 @@ jobs:
           npm run dev -- --host 0.0.0.0 --port 1420 &
           echo $! > /tmp/vite.pid
           for i in $(seq 1 30); do
-            if curl -s http://localhost:1420 > /dev/null; then
+            if curl -s http://127.0.0.1:1420 > /dev/null; then
               echo "Vite ready"
               break
             fi
             sleep 2
           done
-          curl -s http://localhost:1420 | head -n 20
+          curl -s http://127.0.0.1:1420 | head -n 20
 
       - name: Run E2E with mock
         run: npx playwright test

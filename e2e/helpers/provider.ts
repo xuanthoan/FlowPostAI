@@ -2,7 +2,7 @@ import { invoke } from './tauri';
 import type { Page } from '@playwright/test';
 
 export const DEFAULT_ID = 'custom-provider';
-export const DEFAULT_BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:20128/v1';
+export const DEFAULT_BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:20128/v1';
 export const DEFAULT_MODEL = process.env.E2E_MODEL || 'xoay-vong-worker-web-128k';
 export const DEFAULT_API_KEY = process.env.E2E_API_KEY || '';
 export const DEFAULT_PROTOCOL = process.env.E2E_PROTOCOL || 'openai-completions';

@@ -2,8 +2,8 @@
 
 ## Chạy server thật trước
 ```bash
-# Server phải lắng tại http://localhost:20128/v1
-curl -H "Authorization: Bearer $E2E_API_KEY" http://localhost:20128/v1/models
+# Server phải lắng tại http://127.0.0.1:20128/v1
+curl -H "Authorization: Bearer $E2E_API_KEY" http://127.0.0.1:20128/v1/models
 ```
 
 ## Chạy E2E
@@ -20,7 +20,7 @@ npm run tauri:dev
 
 # Terminal 2 (đặt env, không commit key):
 $env:E2E_API_KEY="sk-REPLACE_WITH_YOUR_KEY"
-$env:E2E_BASE_URL="http://localhost:20128/v1"
+$env:E2E_BASE_URL="http://127.0.0.1:20128/v1"
 npx playwright test
 # hoặc
 npm run e2e

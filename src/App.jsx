@@ -82,7 +82,7 @@ function ProvidersPanel() {
   const desktop = isDesktop()
   const [providers, setProviders] = useState([])
   const [activeId, setActiveId] = useState('')
-  const [form, setForm] = useState({ id: 'custom-provider', displayName: 'Custom provider', baseUrl: 'http://localhost:20128/v1/chat/completions', protocol: 'openai-completions', apiKey: '', models: [] })
+  const [form, setForm] = useState({ id: 'custom-provider', displayName: 'Custom provider', baseUrl: 'http://127.0.0.1:20128/v1/chat/completions', protocol: 'openai-completions', apiKey: '', models: [] })
   const [hasApiKey, setHasApiKey] = useState(false)
   const [modelInput, setModelInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -122,7 +122,7 @@ function ProvidersPanel() {
   }
 
   const handleAddNew = () => {
-    setForm({ id: '', displayName: '', baseUrl: 'http://localhost:20128/v1/chat/completions', protocol: 'openai-completions', apiKey: '', models: [] })
+    setForm({ id: '', displayName: '', baseUrl: 'http://127.0.0.1:20128/v1/chat/completions', protocol: 'openai-completions', apiKey: '', models: [] })
     setHasApiKey(false)
     setIsEditing(false)
     setErr(''); setMsg('')

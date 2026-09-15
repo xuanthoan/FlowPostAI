@@ -10,7 +10,7 @@ window.__TAURI_INTERNALS__ = {};
   let mockSelectedPageId = null;
   let mockConfig = { intervalSeconds: 30, enabled: true, selectedPageId: null };
   window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
-    const baseUrl = 'http://localhost:20128/v1';
+    const baseUrl = 'http://127.0.0.1:20128/v1';
     switch (cmd) {
       case 'list_providers':
         return [{ id: 'custom-provider', displayName: 'Custom provider', baseUrl: baseUrl, protocol: 'openai-completions', models: ['xoay-vong-worker-web-128k'], hasApiKey: true }];

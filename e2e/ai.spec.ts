@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { invoke, isTauri } from './helpers/tauri';
 import { ensureProvider } from './helpers/provider';
 
-const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:20128/v1';
+const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:20128/v1';
 
 const mockImplCode = `
 window.__TAURI_MOCK__ = true;
