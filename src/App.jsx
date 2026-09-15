@@ -136,11 +136,11 @@ function ProvidersPanel() {
     setBusy(true); setErr(''); setMsg('')
     try {
       if (!isEditing) {
-        const payload = { id: form.id.trim().toLowerCase(), displayName: form.displayName || null, baseUrl: form.baseUrl, models: form.models.length ? form.models : null, apiKey: form.apiKey || null }
+        const payload = { id: form.id.trim().toLowerCase(), displayName: form.displayName || null, baseUrl: form.baseUrl, protocol: 'openai-completions', models: form.models.length ? form.models : null, apiKey: form.apiKey || null }
         await invokeDesktop('create_provider', { payload })
         setMsg('Đã tạo provider')
       } else {
-        const payload = { displayName: form.displayName || null, baseUrl: form.baseUrl, models: form.models, apiKey: form.apiKey || null }
+        const payload = { displayName: form.displayName || null, baseUrl: form.baseUrl, protocol: 'openai-completions', models: form.models, apiKey: form.apiKey || null }
         await invokeDesktop('update_provider', { id: form.id, payload })
         setMsg('Đã cập nhật provider')
       }
