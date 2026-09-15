@@ -82,7 +82,7 @@ function ProvidersPanel() {
   const desktop = isDesktop()
   const [providers, setProviders] = useState([])
   const [activeId, setActiveId] = useState('')
-  const [form, setForm] = useState({ id: 'custom-provider', displayName: 'Custom provider', baseUrl: 'http://localhost:20128/v1', protocol: 'openai-completions', apiKey: '', models: [] })
+  const [form, setForm] = useState({ id: 'custom-provider', displayName: 'Custom provider', baseUrl: 'http://localhost:20128/v1/chat/completions', protocol: 'openai-completions', apiKey: '', models: [] })
   const [hasApiKey, setHasApiKey] = useState(false)
   const [modelInput, setModelInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -122,7 +122,7 @@ function ProvidersPanel() {
   }
 
   const handleAddNew = () => {
-    setForm({ id: '', displayName: '', baseUrl: 'http://localhost:20128/v1', protocol: 'openai-completions', apiKey: '', models: [] })
+    setForm({ id: '', displayName: '', baseUrl: 'http://localhost:20128/v1/chat/completions', protocol: 'openai-completions', apiKey: '', models: [] })
     setHasApiKey(false)
     setIsEditing(false)
     setErr(''); setMsg('')
@@ -201,7 +201,7 @@ function ProvidersPanel() {
         </div>
         <div>
           <label style={{fontSize:13, fontWeight:700}}>Base URL</label>
-          <input value={form.baseUrl} onChange={e=>setForm(f=>({...f, baseUrl:e.target.value}))} disabled={busy} placeholder="https://gateway.example/v1" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
+          <input value={form.baseUrl} onChange={e=>setForm(f=>({...f, baseUrl:e.target.value}))} disabled={busy} placeholder="Full endpoint URL e.g. https://api.example.com/v1/chat/completions" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
         </div>
         <div>
           <label style={{fontSize:13, fontWeight:700}}>API protocol</label>

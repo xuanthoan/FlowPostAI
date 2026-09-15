@@ -139,10 +139,8 @@ fn max_tokens_for_length(length: Option<&str>) -> u32 {
     }
 }
 
-fn endpoint_for_protocol(base_url: &str, _protocol: &str) -> String {
-    // Server has a single endpoint — protocol only affects request/response format, not URL
-    base_url.to_string()
-}
+// NOTE: base_url IS the full endpoint URL (e.g. "http://localhost:20128/v1/chat/completions").
+// We do NOT append any suffix — different servers use different paths.
 
 async fn call_ai_provider(
     app: &AppHandle<impl Runtime>,
@@ -172,7 +170,7 @@ async fn call_ai_provider(
                 temperature: 0.7,
             };
             let b = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-            (b, endpoint_for_protocol(&base_url, protocol))
+            (b, base_url.clone())
         }
         "anthropic-messages" => {
             let req = AnthropicMessagesRequest {
@@ -182,7 +180,7 @@ async fn call_ai_provider(
                 max_tokens,
             };
             let b = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-            (b, endpoint_for_protocol(&base_url, protocol))
+            (b, base_url.clone())
         }
         _ => {
             let req = ChatCompletionRequest {
@@ -195,7 +193,7 @@ async fn call_ai_provider(
                 temperature: 0.7,
             };
             let b = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-            (b, endpoint_for_protocol(&base_url, protocol))
+            (b, base_url.clone())
         }
     };
 
@@ -447,15 +445,7 @@ mod tests {
         assert_eq!(max_tokens_for_length(Some("unknown")), 500);
     }
 
-    #[test]
-    fn test_endpoint_for_protocol() {
-        // All protocols use the same endpoint — protocol only affects request/response format
-        assert_eq!(endpoint_for_protocol("http://localhost:20128/v1", "openai-completions"), "http://localhost:20128/v1");
-        assert_eq!(endpoint_for_protocol("http://localhost:20128/v1", "openai-responses"), "http://localhost:20128/v1");
-        assert_eq!(endpoint_for_protocol("http://localhost:20128/v1", "anthropic-messages"), "http://localhost:20128/v1");
-        assert_eq!(endpoint_for_protocol("https://api.anthropic.com/v1", "anthropic-messages"), "https://api.anthropic.com/v1");
-        assert_eq!(endpoint_for_protocol("https://api.openai.com/v1", "unknown"), "https://api.openai.com/v1");
-    }
+    // endpoint_for_protocol removed — base_url is now used directly as the full endpoint URL.
 
     #[test]
     fn test_responses_request_serialization() {

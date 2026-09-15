@@ -3,7 +3,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, Runtime};
 
-pub const DEFAULT_BASE_URL: &str = "http://localhost:20128/v1";
+// The full endpoint URL. We do NOT append any suffix to this — different servers
+// use different paths (e.g. /v1/chat/completions, /v1/responses, /v1).
+// Set this to the exact URL your server expects POST requests on.
+pub const DEFAULT_BASE_URL: &str = "http://localhost:20128/v1/chat/completions";
 pub const DEFAULT_MODEL: &str = "xoay-vong-worker-web-128k";
 pub const DEFAULT_PROVIDER_ID: &str = "custom-provider";
 pub const DEFAULT_DISPLAY_NAME: &str = "Custom provider";
