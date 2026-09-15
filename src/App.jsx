@@ -82,7 +82,7 @@ function ProvidersPanel() {
   const desktop = isDesktop()
   const [providers, setProviders] = useState([])
   const [activeId, setActiveId] = useState('')
-  const [form, setForm] = useState({ id: 'custom-provider', displayName: 'Custom provider', baseUrl: 'http://127.0.0.1:20128/v1/chat/completions', protocol: 'openai-completions', apiKey: '', models: [] })
+  const [form, setForm] = useState({ id: 'custom-provider', displayName: 'Custom provider', baseUrl: 'http://127.0.0.1:20128/v1/chat/completions', apiKey: '', models: [] })
   const [hasApiKey, setHasApiKey] = useState(false)
   const [modelInput, setModelInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -102,7 +102,7 @@ function ProvidersPanel() {
           const found = list.find(p => p.id === a.id)
           if (found) active = found
         } catch (_e) { void _e }
-        setForm({ id: active.id, displayName: active.displayName || active.id, baseUrl: active.baseUrl, protocol: active.protocol, apiKey: '', models: active.models || [] })
+        setForm({ id: active.id, displayName: active.displayName || active.id, baseUrl: active.baseUrl, apiKey: '', models: active.models || [] })
         setHasApiKey(!!active.hasApiKey)
         setIsEditing(true)
       } else {
@@ -115,14 +115,14 @@ function ProvidersPanel() {
   const selectProvider = (id) => {
     const p = providers.find(x => x.id === id)
     if (!p) return
-    setForm({ id: p.id, displayName: p.displayName || p.id, baseUrl: p.baseUrl, protocol: p.protocol, apiKey: '', models: p.models || [] })
+    setForm({ id: p.id, displayName: p.displayName || p.id, baseUrl: p.baseUrl, apiKey: '', models: p.models || [] })
     setHasApiKey(!!p.hasApiKey)
     setIsEditing(true)
     setErr(''); setMsg('')
   }
 
   const handleAddNew = () => {
-    setForm({ id: '', displayName: '', baseUrl: 'http://127.0.0.1:20128/v1/chat/completions', protocol: 'openai-completions', apiKey: '', models: [] })
+    setForm({ id: '', displayName: '', baseUrl: 'http://127.0.0.1:20128/v1/chat/completions', apiKey: '', models: [] })
     setHasApiKey(false)
     setIsEditing(false)
     setErr(''); setMsg('')
@@ -136,11 +136,11 @@ function ProvidersPanel() {
     setBusy(true); setErr(''); setMsg('')
     try {
       if (!isEditing) {
-        const payload = { id: form.id.trim().toLowerCase(), displayName: form.displayName || null, baseUrl: form.baseUrl, protocol: form.protocol, models: form.models.length ? form.models : null, apiKey: form.apiKey || null }
+        const payload = { id: form.id.trim().toLowerCase(), displayName: form.displayName || null, baseUrl: form.baseUrl, models: form.models.length ? form.models : null, apiKey: form.apiKey || null }
         await invokeDesktop('create_provider', { payload })
         setMsg('Đã tạo provider')
       } else {
-        const payload = { displayName: form.displayName || null, baseUrl: form.baseUrl, protocol: form.protocol, models: form.models, apiKey: form.apiKey || null }
+        const payload = { displayName: form.displayName || null, baseUrl: form.baseUrl, models: form.models, apiKey: form.apiKey || null }
         await invokeDesktop('update_provider', { id: form.id, payload })
         setMsg('Đã cập nhật provider')
       }
@@ -175,7 +175,7 @@ function ProvidersPanel() {
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}><strong style={{fontSize:14}}>Danh sách Providers ({providers.length})</strong><button className="outline" onClick={handleAddNew} disabled={!desktop||busy} style={{height:30, fontSize:13}}><Plus size={12}/> Thêm Provider</button></div>
       <div style={{display:'flex', flexDirection:'column', gap:6}}>
         {providers.map(p=> <div key={p.id} onClick={()=>selectProvider(p.id)} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 10px', border: p.id===form.id ? '2px solid #6558d6' : '1px solid #e8e8ed', borderRadius:8, background: p.id===activeId ? '#f0eefc' : '#fff', cursor:'pointer'}}>
-          <div style={{display:'flex', alignItems:'center', gap:8}}><strong style={{fontSize:13}}>{p.displayName || p.id}</strong><span style={{fontSize:11, background: p.id===activeId ? '#6558d6' : '#eee', color: p.id===activeId ? '#fff' : '#666', padding:'2px 6px', borderRadius:10}}>{p.protocol}</span><span style={{width:8, height:8, borderRadius:8, background: p.hasApiKey ? '#4caf50' : '#ccc', display:'inline-block'}} title={p.hasApiKey ? 'Đã lưu API key' : 'Chưa có key'}/><span style={{fontSize:11, color:'#777'}}>{p.id}</span></div>
+          <div style={{display:'flex', alignItems:'center', gap:8}}><strong style={{fontSize:13}}>{p.displayName || p.id}</strong><span style={{width:8, height:8, borderRadius:8, background: p.hasApiKey ? '#4caf50' : '#ccc', display:'inline-block'}} title={p.hasApiKey ? 'Đã lưu API key' : 'Chưa có key'}/><span style={{fontSize:11, color:'#777'}}>{p.id}</span></div>
           <span style={{fontSize:11, color: p.id===activeId ? '#6558d6' : '#999'}}>{p.id===activeId ? '● active' : ''} {p.id===form.id ? '● đang sửa' : ''}</span>
         </div>)}
       </div>
@@ -202,14 +202,6 @@ function ProvidersPanel() {
         <div>
           <label style={{fontSize:13, fontWeight:700}}>Base URL</label>
           <input value={form.baseUrl} onChange={e=>setForm(f=>({...f, baseUrl:e.target.value}))} disabled={busy} placeholder="Full endpoint URL e.g. https://api.example.com/v1/chat/completions" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
-        </div>
-        <div>
-          <label style={{fontSize:13, fontWeight:700}}>API protocol</label>
-          <select value={form.protocol} onChange={e=>setForm(f=>({...f, protocol:e.target.value}))} disabled={busy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:6, fontSize:14}}>
-            <option value="openai-completions">openai-completions</option>
-            <option value="openai-responses">openai-responses</option>
-            <option value="anthropic-messages">anthropic-messages</option>
-          </select>
         </div>
         <div>
           <label style={{fontSize:13, fontWeight:700}}>API key</label>

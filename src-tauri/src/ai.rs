@@ -158,44 +158,19 @@ async fn call_ai_provider(
         .cloned()
         .unwrap_or_else(|| crate::providers::DEFAULT_MODEL.to_string());
     let base_url = provider.base_url.trim_end_matches('/').replace("localhost", "127.0.0.1").to_string();
-    let protocol = provider.protocol.as_str();
 
-    let (body, url) = match protocol {
-        "openai-responses" => {
-            let req = ResponsesRequest {
-                model: &model,
-                input: prompt,
-                instructions: &system_msg,
-                max_output_tokens: max_tokens,
-                temperature: 0.7,
-            };
-            let b = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-            (b, base_url.clone())
-        }
-        "anthropic-messages" => {
-            let req = AnthropicMessagesRequest {
-                model: &model,
-                system: &system_msg,
-                messages: vec![Message { role: "user", content: prompt }],
-                max_tokens,
-            };
-            let b = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-            (b, base_url.clone())
-        }
-        _ => {
-            let req = ChatCompletionRequest {
-                model: &model,
-                messages: vec![
-                    Message { role: "system", content: &system_msg },
-                    Message { role: "user", content: prompt },
-                ],
-                max_tokens,
-                temperature: 0.7,
-            };
-            let b = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-            (b, base_url.clone())
-        }
+    // Protocol is hardcoded to openai-completions — the server handles all formats at the same endpoint
+    let req = ChatCompletionRequest {
+        model: &model,
+        messages: vec![
+            Message { role: "system", content: &system_msg },
+            Message { role: "user", content: prompt },
+        ],
+        max_tokens,
+        temperature: 0.7,
     };
+    let body = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+    let url = base_url.clone();
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(AI_TIMEOUT_SECS))
@@ -203,15 +178,10 @@ async fn call_ai_provider(
         .build()
         .map_err(|e| format!("Không thể khởi tạo HTTP client: {}", e))?;
 
-    let mut req_builder = client
+    let req_builder = client
         .post(&url)
         .header("Authorization", format!("Bearer {}", key))
         .header("Content-Type", "application/json");
-    if protocol == "anthropic-messages" {
-        req_builder = req_builder
-            .header("x-api-key", key.clone())
-            .header("anthropic-version", "2023-06-01");
-    }
     let resp = req_builder
         .body(body)
         .send()
@@ -226,50 +196,12 @@ async fn call_ai_provider(
     let response_body = resp.text().await.map_err(|e| e.to_string())?;
 
     if status >= 200 && status < 300 {
-        match protocol {
-            "openai-responses" => {
-                let parsed: ResponsesResponse = serde_json::from_str(&response_body)
-                    .map_err(|e| format!("Không parse được phản hồi AI: {}", e))?;
-                for out in &parsed.output {
-                    for c in &out.content {
-                        if c.ctype == "output_text" && !c.text.trim().is_empty() {
-                            return Ok(c.text.clone());
-                        }
-                    }
-                }
-                // fallback: try generic extraction
-                if let Ok(v) = serde_json::from_str::<Value>(&response_body) {
-                    if let Some(t) = v.get("output_text").and_then(|x| x.as_str()) {
-                        return Ok(t.to_string());
-                    }
-                }
-                Err("Phản hồi AI (responses) không có nội dung".into())
-            }
-            "anthropic-messages" => {
-                let parsed: AnthropicMessagesResponse = serde_json::from_str(&response_body)
-                    .map_err(|e| format!("Không parse được phản hồi AI: {}", e))?;
-                let combined: String = parsed
-                    .content
-                    .iter()
-                    .filter(|c| c.ctype == "text")
-                    .map(|c| c.text.clone())
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                if combined.trim().is_empty() {
-                    Err("Phản hồi AI (anthropic) không có nội dung".into())
-                } else {
-                    Ok(combined)
-                }
-            }
-            _ => {
-                let parsed: ChatCompletionResponse = serde_json::from_str(&response_body)
-                    .map_err(|e| format!("Không parse được phản hồi AI: {}", e))?;
-                if let Some(choice) = parsed.choices.first() {
-                    Ok(choice.message.content.clone())
-                } else {
-                    Err("Phản hồi AI không có choices".into())
-                }
-            }
+        let parsed: ChatCompletionResponse = serde_json::from_str(&response_body)
+            .map_err(|e| format!("Không parse được phản hồi AI: {}", e))?;
+        if let Some(choice) = parsed.choices.first() {
+            Ok(choice.message.content.clone())
+        } else {
+            Err("Phản hồi AI không có choices".into())
         }
     } else {
         let error_msg = match status {
