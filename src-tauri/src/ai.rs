@@ -157,7 +157,7 @@ async fn call_ai_provider(
         .first()
         .cloned()
         .unwrap_or_else(|| crate::providers::DEFAULT_MODEL.to_string());
-    let base_url = provider.base_url.trim_end_matches('/').to_string();
+    let base_url = provider.base_url.trim_end_matches('/').replace("localhost", "127.0.0.1").to_string();
     let protocol = provider.protocol.as_str();
 
     let (body, url) = match protocol {
