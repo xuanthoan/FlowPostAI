@@ -194,7 +194,7 @@ fn decode_response_bytes(bytes: &[u8]) -> String {
 const MOJIBAKE_MAX_PASSES: usize = 2;
 
 /// Observable marker proving which repair revision is running.
-pub const MOJIBAKE_REPAIR_VERSION: &str = "v2";
+pub const MOJIBAKE_REPAIR_VERSION: &str = "v3";
 
 /// One repair pass: decode each maximal run of CP1252-mappable chars independently.
 fn repair_once(s: &str) -> String {
@@ -225,8 +225,36 @@ fn flush_run(out: &mut String, original: &str, start: usize, end: usize, run: &m
     }
     let original_run = &original[start..end];
     match std::str::from_utf8(run) {
-        Ok(decoded) if decoded != original_run => out.push_str(decoded),
-        _ => out.push_str(original_run),
+        Ok(decoded) => {
+            if decoded != original_run {
+                out.push_str(decoded);
+            } else {
+                out.push_str(original_run);
+            }
+        }
+        Err(err) => {
+            let valid_up_to = err.valid_up_to();
+            // `valid_up_to` guarantees the prefix is valid UTF-8.
+            let decoded_prefix = std::str::from_utf8(&run[..valid_up_to])
+                .expect("valid_up_to guarantees a valid UTF-8 prefix");
+            // Only accept partial salvage when it produced real multi-byte content
+            // (a char above Latin-1); otherwise keep the run untouched so genuine
+            // Latin-1 text (e.g. "café – test") is never altered.
+            let improved = decoded_prefix.chars().any(|c| c as u32 > 0x00FF);
+            if valid_up_to == 0 || !improved {
+                out.push_str(original_run);
+            } else {
+                out.push_str(decoded_prefix);
+                // Each mappable char maps to exactly one byte, so `valid_up_to`
+                // (a byte count) is also the number of original run chars consumed.
+                let leftover: String = original_run.chars().skip(valid_up_to).collect();
+                if err.error_len().is_some() {
+                    // Malformed mid-stream: preserve remaining original chars verbatim.
+                    out.push_str(&leftover);
+                }
+                // else: trailing incomplete sequence (unrecoverable partial char) -> drop it.
+            }
+        }
     }
     run.clear();
 }
@@ -808,5 +836,77 @@ mod tests {
         let decoded = decode_response_bytes(raw);
         assert_eq!(decoded, "Báº¡n");
         assert_eq!(repair_mojibake(&decoded), "Bạn");
+    }
+
+    // Ground-truth 64-byte preview captured from the app's own diagnostic log.
+    fn real_captured_bytes() -> [u8; 64] {
+        [
+            0x4E, 0x55, 0x54, 0x52, 0x49, 0x46, 0x52, 0x45, 0x53, 0x48, 0x20, 0x2D, 0x20, 0x54, 0x48, 0xC3,
+            0x86, 0xC2, 0xAF, 0xC3, 0x86, 0xC2, 0xA0, 0x4E, 0x47, 0x20, 0x48, 0x49, 0xC3, 0xA1, 0xC2, 0xBB,
+            0xE2, 0x80, 0xA0, 0x55, 0x20, 0xC3, 0x84, 0xEF, 0xBF, 0xBD, 0xC3, 0xA1, 0xC2, 0xBB, 0xE2, 0x80,
+            0x99, 0x20, 0xC3, 0x84, 0xE2, 0x80, 0x9A, 0x4E, 0x20, 0x54, 0x48, 0xC3, 0xA1, 0xC2, 0xBB, 0xC2,
+        ]
+    }
+
+    #[test]
+    fn test_repair_mojibake_real_captured_bytes_partial_salvage() {
+        let raw = real_captured_bytes();
+        let input = String::from_utf8_lossy(&raw).to_string();
+        let out = repair_mojibake(&input);
+
+        // "Đ" was genuinely lost upstream (byte 0x90 -> U+FFFD), so only "Ồ ĂN" is recoverable here.
+        assert!(out.contains("THƯƠNG HIỆU"), "expected 'THƯƠNG HIỆU' in: {}", out);
+        assert!(out.contains("Ồ ĂN"), "expected 'Ồ ĂN' in: {}", out);
+
+        for marker in ['Æ', '†', '’', '‚'] {
+            assert!(!out.contains(marker), "marker {:?} survived: {}", marker, out);
+        }
+        assert!(!out.contains("á»"), "mojibake 'á»' survived: {}", out);
+        assert!(!out.contains("Ä‚"), "mojibake 'Ä‚' survived: {}", out);
+        assert!(!out.contains("Ä‘"), "mojibake 'Ä‘' survived: {}", out);
+
+        assert_eq!(out.matches('\u{FFFD}').count(), input.matches('\u{FFFD}').count());
+        assert!(out.matches('\u{FFFD}').count() <= 2, "too many U+FFFD: {}", out);
+
+        assert_eq!(repair_mojibake(&out), out, "repair must be idempotent: {}", out);
+    }
+
+    #[test]
+    fn test_repair_mojibake_lossless_full_title_round_trip() {
+        let expected = "NUTRIFRESH - THƯƠNG HIỆU ĐỒ ĂN THỰC DƯỠNG";
+        let corrupted = corrupt_to_cp1252(expected);
+        assert_ne!(corrupted, expected);
+        assert_eq!(repair_mojibake(&corrupted), expected);
+    }
+
+    #[test]
+    fn test_repair_mojibake_survives_injected_fffd_mid_string() {
+        let full = corrupt_to_cp1252("Bạn đã bao giờ");
+        let corrupted_d = corrupt_to_cp1252("đ");
+        let damaged = full.replacen(&corrupted_d, "\u{FFFD}", 1);
+        assert!(damaged.contains('\u{FFFD}'), "construction must inject U+FFFD");
+
+        let out = repair_mojibake(&damaged);
+        assert_eq!(out, "Bạn \u{FFFD}ã bao giờ");
+        assert_eq!(out.matches('\u{FFFD}').count(), 1);
+    }
+
+    #[test]
+    fn test_repair_mojibake_latin1_text_unchanged() {
+        for s in ["café – test", "Résumé – déjà vu", "naïve façade"] {
+            assert_eq!(repair_mojibake(s), s, "legit Latin-1 text altered: {}", s);
+        }
+    }
+
+    #[test]
+    fn test_repair_mojibake_dangling_lead_byte_not_reemitted() {
+        let raw = real_captured_bytes();
+        let out = repair_mojibake(&String::from_utf8_lossy(&raw));
+        assert!(!out.contains('Ä'), "stray 'Ä' leaked: {}", out);
+    }
+
+    #[test]
+    fn test_mojibake_repair_version_is_v3() {
+        assert_eq!(MOJIBAKE_REPAIR_VERSION, "v3");
     }
 }

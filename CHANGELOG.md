@@ -14,6 +14,8 @@ Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở �
 - `src-tauri/src/ai.rs` — 9 test mới (round-trip, segment quanh U+FFFD, idempotent, double-layer, decode UTF-8/CP1252, pipeline decode→repair)
 ### Verified
 - `cargo test --lib` 85 passed / 0 failed (76 cũ + 9 mới); `cargo check` 0 errors; `npm run build` OK. `npm run lint` bị chặn bởi quyền sandbox trong phiên QA (diff thuần Rust nên không ảnh hưởng ESLint). Kiểm thử GUI end-to-end với AI thật: người dùng cần rebuild và xác nhận.
+- **Round 3 (v3) — partial-run salvage**: `flush_run` giờ cứu được tiền tố UTF-8 hợp lệ dài nhất của một "run" hỏng, thay vì bỏ luôn cả run. Nguyên nhân còn sót: gateway (`127.0.0.1:20128`) giải mã UTF-8 sai sang CP1252 và biến 5 byte CP1252 không xác định (0x81/0x8D/0x8F/0x90/0x9D) trong chuỗi UTF-8 tiếng Việt thành `U+FFFD`, khiến run ngay cạnh bị cụt (dangling lead byte) và trước đây bị bỏ toàn bộ. Guard `improved` (chỉ nhận khi tiền tố chứa ký tự > U+00FF) đảm bảo văn bản Latin-1 hợp lệ (`café – test`, `Résumé – déjà vu`, `naïve façade`) không bị sửa. Marker `MOJIBAKE_REPAIR_VERSION = "v3"`. Bằng chứng: `cargo test --lib` 91 passed / 0 failed; 6 test mới dựa trên 64 byte hex thật lấy từ log app; `cargo check` 0 lỗi; chỉ `src-tauri/src/ai.rs` thay đổi.
+- **Giới hạn không thể tránh**: các ký tự mà gateway đã mất byte (hiển thị `�`) KHÔNG thể phục hồi (ví dụ `Đ` trong `ĐỒ`); phần văn bản còn lại được phục hồi đầy đủ. Khuyến nghị sửa tận gốc: cấu hình gateway/proxy trả response UTF-8 đúng.
 
 ## [Unreleased] - 2026-10-17 — Fix sửa bài viết ở Kho nội dung
 ### Fixed
