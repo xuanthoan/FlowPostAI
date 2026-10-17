@@ -71,7 +71,12 @@ fn read_content_index(app: &AppHandle) -> Result<Vec<ContentItem>, String> {
     if contents.trim().is_empty() {
         return Ok(Vec::new());
     }
-    serde_json::from_str(&contents).map_err(|e| e.to_string())
+    let mut items: Vec<ContentItem> = serde_json::from_str(&contents).map_err(|e| e.to_string())?;
+    for it in items.iter_mut() {
+        it.title = crate::ai::repair_mojibake(&it.title);
+        it.body = crate::ai::repair_mojibake(&it.body);
+    }
+    Ok(items)
 }
 
 fn write_content_index(app: &AppHandle, items: &[ContentItem]) -> Result<(), String> {

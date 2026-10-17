@@ -2,6 +2,19 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-17 — Fix triệt để mojibake output AI (encoding)
+### Fixed
+- `src-tauri/src/ai.rs` — thay `String::from_utf8_lossy` (tạo U+FFFD, phá byte) bằng `decode_response_bytes` không mất dữ liệu: UTF-8 nghiêm ngặt, fallback giải mã CP1252 (byte→char)
+- `src-tauri/src/ai.rs` — viết lại `repair_mojibake` theo segment-wise: mỗi đoạn ký tự map-được CP1252 được giải mã độc lập; ký tự không map được (U+FFFD, emoji, chữ Việt đúng) đi xuyên qua và KHÔNG chặn việc phục hồi các đoạn lân cận (trước đây guard all-or-nothing khiến 1 ký tự lỗi khoá toàn bộ tiêu đề + thân bài)
+- `src-tauri/src/ai.rs` — `repair_mojibake` lặp tối đa 2 lượt (`MOJIBAKE_MAX_PASSES`) để xử lý double-encoding; idempotent, không đổi văn bản Việt/ASCII đúng
+- `src-tauri/src/content.rs` — `read_content_index` phục hồi mojibake khi ĐỌC (in-memory, KHÔNG ghi lại file) để bài viết cũ trong Kho nội dung hiển thị đúng
+### Added
+- `src-tauri/src/ai.rs` — marker `MOJIBAKE_REPAIR_VERSION = "v2"` + log khởi động trong `lib.rs run()` và log mỗi lần `generate_content` (chứng minh build mới đang chạy)
+- `src-tauri/src/ai.rs` — chẩn đoán `looks_like_mojibake` + `log_mojibake_preview` (giới hạn 64 byte hex, chỉ in khi còn mojibake sau khi sửa; không in prompt/header/key)
+- `src-tauri/src/ai.rs` — 9 test mới (round-trip, segment quanh U+FFFD, idempotent, double-layer, decode UTF-8/CP1252, pipeline decode→repair)
+### Verified
+- `cargo test --lib` 85 passed / 0 failed (76 cũ + 9 mới); `cargo check` 0 errors; `npm run build` OK. `npm run lint` bị chặn bởi quyền sandbox trong phiên QA (diff thuần Rust nên không ảnh hưởng ESLint). Kiểm thử GUI end-to-end với AI thật: người dùng cần rebuild và xác nhận.
+
 ## [Unreleased] - 2026-10-17 — Fix sửa bài viết ở Kho nội dung
 ### Fixed
 - `src/App.jsx` — lỗi `update_content missing required key payload`: bọc tham số trong `{ payload: { contentId, title, body, prompt, style, customStyle, mediaIds } }` (khớp `save_content`)

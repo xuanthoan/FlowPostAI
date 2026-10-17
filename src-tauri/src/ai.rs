@@ -33,7 +33,7 @@ fn build_system_message(style: &str, custom_style: Option<&str>) -> String {
         style
     };
     format!(
-        "Bạn là chuyên gia viết nội dung Facebook với style: {}\n\nQUY TẮC ĐỊNH DẠNG BẮT BUỘC (tuân thủ tuyệt đối):\n1. Chỉ viết văn bản thuần (plain text). KHÔNG dùng markdown.\n2. KHÔNG dùng các ký tự: #, ##, ###, **, *, _, `, >, hoặc gạch đầu dòng markdown.\n3. Dòng đầu tiên là TIÊU ĐỀ, viết IN HOA toàn bộ.\n4. Sau tiêu đề, để trống 2 dòng rồi mới viết phần thân bài.\n5. Không viết tiêu đề và thân bài trên cùng một dòng.",
+        "Bạn là chuyên gia viết nội dung Facebook với style: {}\n\nQUY TẮC ĐỊNH DẠNG BẮT BUỘC (tuân thủ tuyệt đối):\n1. Chỉ viết văn bản thuần (plain text). KHÔNG dùng markdown.\n2. KHÔNG dùng các ký tự: #, ##, ###, **, *, _, `, >, hoặc gạch đầu dòng markdown.\n3. Dòng đầu tiên là TIÊU ĐỀ, viết IN HOA toàn bộ.\n4. Sau tiêu đề, để trống 2 dòng rồi mới viết phần thân bài.\n5. Không viết tiêu đề và thân bài trên cùng một dòng.\n6. NGÔN NGỮ BẮT BUỘC: Luôn trả lời bằng ĐÚNG ngôn ngữ mà người dùng đã dùng trong câu yêu cầu. Người dùng viết tiếng Việt thì trả về tiếng Việt; người dùng viết tiếng Anh thì trả về tiếng Anh. Không tự dịch hoặc đổi sang ngôn ngữ khác.",
         style_label
     )
 }
@@ -150,7 +150,103 @@ fn strip_markdown(input: &str) -> String {
     out.join("\n")
 }
 
+/// Reverse lookup: map a Unicode char that could be produced by decoding a
+/// Windows-1252/ISO-8859-1 byte back to that byte.
+fn cp1252_char_to_byte(c: char) -> Option<u8> {
+    match c {
+        '\u{0000}'..='\u{007F}' => Some(c as u8),
+        '\u{0080}'..='\u{009F}' => Some(c as u8),
+        '\u{00A0}'..='\u{00FF}' => Some(c as u8),
+        '€' => Some(0x80), '‚' => Some(0x82), 'ƒ' => Some(0x83), '„' => Some(0x84),
+        '…' => Some(0x85), '†' => Some(0x86), '‡' => Some(0x87), 'ˆ' => Some(0x88),
+        '‰' => Some(0x89), 'Š' => Some(0x8A), '‹' => Some(0x8B), 'Œ' => Some(0x8C),
+        'Ž' => Some(0x8E), '‘' => Some(0x91), '’' => Some(0x92), '“' => Some(0x93),
+        '”' => Some(0x94), '•' => Some(0x95), '–' => Some(0x96), '—' => Some(0x97),
+        '˜' => Some(0x98), '™' => Some(0x99), 'š' => Some(0x9A), '›' => Some(0x9B),
+        'œ' => Some(0x9C), 'ž' => Some(0x9E), 'Ÿ' => Some(0x9F),
+        _ => None,
+    }
+}
+
+/// Windows-1252 byte -> char. Inverse of cp1252_char_to_byte.
+fn cp1252_byte_to_char(b: u8) -> char {
+    match b {
+        0x80 => '€', 0x82 => '‚', 0x83 => 'ƒ', 0x84 => '„', 0x85 => '…',
+        0x86 => '†', 0x87 => '‡', 0x88 => 'ˆ', 0x89 => '‰', 0x8A => 'Š',
+        0x8B => '‹', 0x8C => 'Œ', 0x8E => 'Ž', 0x91 => '‘', 0x92 => '’',
+        0x93 => '“', 0x94 => '”', 0x95 => '•', 0x96 => '–', 0x97 => '—',
+        0x98 => '˜', 0x99 => '™', 0x9A => 'š', 0x9B => '›', 0x9C => 'œ',
+        0x9E => 'ž', 0x9F => 'Ÿ',
+        0x81 | 0x8D | 0x8F | 0x90 | 0x9D => b as char,
+        _ => b as char,
+    }
+}
+
+/// Decode HTTP response bytes WITHOUT destroying information and WITHOUT inserting U+FFFD.
+/// Prefer strict UTF-8; if invalid, decode as Windows-1252 (byte->char).
+fn decode_response_bytes(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s.to_string(),
+        Err(_) => bytes.iter().map(|&b| cp1252_byte_to_char(b)).collect(),
+    }
+}
+
+const MOJIBAKE_MAX_PASSES: usize = 2;
+
+/// Observable marker proving which repair revision is running.
+pub const MOJIBAKE_REPAIR_VERSION: &str = "v2";
+
+/// One repair pass: decode each maximal run of CP1252-mappable chars independently.
+fn repair_once(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut run: Vec<u8> = Vec::new();
+    let mut run_start: usize = 0;
+    for (idx, ch) in s.char_indices() {
+        match cp1252_char_to_byte(ch) {
+            Some(b) => {
+                if run.is_empty() {
+                    run_start = idx;
+                }
+                run.push(b);
+            }
+            None => {
+                flush_run(&mut out, s, run_start, idx, &mut run);
+                out.push(ch);
+            }
+        }
+    }
+    flush_run(&mut out, s, run_start, s.len(), &mut run);
+    out
+}
+
+fn flush_run(out: &mut String, original: &str, start: usize, end: usize, run: &mut Vec<u8>) {
+    if run.is_empty() {
+        return;
+    }
+    let original_run = &original[start..end];
+    match std::str::from_utf8(run) {
+        Ok(decoded) if decoded != original_run => out.push_str(decoded),
+        _ => out.push_str(original_run),
+    }
+    run.clear();
+}
+
+/// Loss-tolerant, segment-wise mojibake recovery; iterates up to MOJIBAKE_MAX_PASSES; idempotent.
+pub(crate) fn repair_mojibake(s: &str) -> String {
+    let mut cur = s.to_string();
+    for _ in 0..MOJIBAKE_MAX_PASSES {
+        let next = repair_once(&cur);
+        if next == cur {
+            break;
+        }
+        cur = next;
+    }
+    cur
+}
+
 fn parse_ai_response(content: &str) -> (String, String) {
+    let repaired = repair_mojibake(content);
+    let content: &str = &repaired;
     // Try to split by \n---\n delimiter for title/body
     let (raw_title, raw_body) = if let Some(idx) = content.find("\n---\n") {
         (content[..idx].to_string(), content[idx + 5..].to_string())
@@ -168,6 +264,18 @@ fn parse_ai_response(content: &str) -> (String, String) {
     };
     let body = strip_markdown(&raw_body).trim().to_string();
     (title, body)
+}
+
+fn looks_like_mojibake(s: &str) -> bool {
+    s.contains('\u{FFFD}') || s.contains('Ã') || s.contains("á»") || s.contains("Ä‘")
+}
+
+fn log_mojibake_preview(s: &str) {
+    let hex: Vec<String> = s.as_bytes().iter().take(64).map(|b| format!("{:02X}", b)).collect();
+    eprintln!(
+        "[FlowPost AI] residual mojibake preview (cap 64 bytes): {}",
+        hex.join(" ")
+    );
 }
 
 fn max_tokens_for_length(length: Option<&str>) -> u32 {
@@ -218,7 +326,7 @@ async fn call_ai_provider(
     let req_builder = client
         .post(&url)
         .header("Authorization", format!("Bearer {}", key))
-        .header("Content-Type", "application/json");
+        .header("Content-Type", "application/json; charset=utf-8");
     let resp = req_builder
         .body(body)
         .send()
@@ -230,7 +338,8 @@ async fn call_ai_provider(
         })?;
 
     let status = resp.status().as_u16();
-    let response_body = resp.text().await.map_err(|e| e.to_string())?;
+    let response_bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    let response_body = decode_response_bytes(&response_bytes);
 
     if status >= 200 && status < 300 {
         if response_body.trim_start().starts_with("data:") || response_body.contains("\ndata:") {
@@ -290,6 +399,7 @@ async fn call_ai_provider(
 
 #[tauri::command]
 pub async fn generate_content<R: Runtime>(app: AppHandle<R>, payload: GeneratePayload) -> Result<GenerateResult, String> {
+    eprintln!("[FlowPost AI] generate_content: mojibake-repair {}", MOJIBAKE_REPAIR_VERSION);
     if payload.prompt.trim().is_empty() {
         return Err("Vui lòng nhập prompt".into());
     }
@@ -299,6 +409,9 @@ pub async fn generate_content<R: Runtime>(app: AppHandle<R>, payload: GeneratePa
 
     let content = call_ai_provider(&app, &payload.prompt, &payload.style, payload.custom_style.as_deref(), payload.length.as_deref()).await?;
     let (title, body) = parse_ai_response(&content);
+    if looks_like_mojibake(&title) || looks_like_mojibake(&body) {
+        log_mojibake_preview(&content);
+    }
 
     Ok(GenerateResult {
         title,
@@ -551,5 +664,149 @@ mod tests {
         let (title, body) = parse_ai_response(&combined);
         assert_eq!(title, "DÒNG 1");
         assert!(body.contains("Dòng 2"));
+    }
+
+    fn corrupt_to_cp1252(s: &str) -> String {
+        s.bytes().map(super::cp1252_byte_to_char).collect()
+    }
+
+    #[test]
+    fn test_repair_mojibake_known_vietnamese() {
+        assert_eq!(repair_mojibake("THIáº¾T Káº¾"), "THIẾT KẾ");
+    }
+
+    #[test]
+    fn test_repair_mojibake_correct_vietnamese_unchanged() {
+        assert_eq!(repair_mojibake("ĐIỀU KỲ DIỆU"), "ĐIỀU KỲ DIỆU");
+    }
+
+    #[test]
+    fn test_repair_mojibake_ascii_unchanged() {
+        assert_eq!(repair_mojibake("Hello World"), "Hello World");
+    }
+
+    #[test]
+    fn test_repair_mojibake_idempotent() {
+        let once = repair_mojibake("THIáº¾T Káº¾");
+        assert_eq!(once, "THIẾT KẾ");
+        assert_eq!(repair_mojibake(&once), once);
+    }
+
+    #[test]
+    fn test_repair_mojibake_replacement_char_unchanged() {
+        let s = "abc\u{FFFD}def";
+        assert_eq!(repair_mojibake(s), s);
+    }
+
+    #[test]
+    fn test_repair_mojibake_round_trip() {
+        let samples = [
+            "THIẾT KẾ NG",
+            "ĐIỀU KỲ DIỆU",
+            "NUTRIFRESH - THIẾT KẾ NG",
+            "Thương hiệu đồ ăn thực dưỡng, an toàn, sạch",
+        ];
+        for s in samples {
+            let corrupted = corrupt_to_cp1252(s);
+            assert_ne!(corrupted, s, "sample must differ when corrupted: {}", s);
+            assert_eq!(repair_mojibake(&corrupted), s, "round-trip failed for {}", s);
+        }
+    }
+
+    #[test]
+    fn test_parse_ai_response_repairs_mojibake() {
+        let (title, body) = parse_ai_response("NUTRIFRESH - THIáº¾T Káº¾ NG\n---\nNá»™i dung");
+        assert_eq!(title, "NUTRIFRESH - THIẾT KẾ NG");
+        assert_eq!(body, "Nội dung");
+    }
+
+    #[test]
+    fn test_build_system_message_contains_language_rule() {
+        let msg = build_system_message("Viral", None);
+        assert!(msg.contains("NGÔN NGỮ BẮT BUỘC"));
+        assert!(msg.contains("ĐÚNG ngôn ngữ"));
+        assert!(msg.contains("tiếng Việt"));
+        assert!(msg.contains("tiếng Anh"));
+        assert!(msg.contains("chuyên gia viết nội dung Facebook"));
+        assert!(msg.contains("KHÔNG dùng markdown"));
+    }
+
+    #[test]
+    fn test_repair_mojibake_round_trip_vietnamese_samples() {
+        for s in ["Bạn đã bao giờ", "CHĂM SÓC TỰ NHIÊN", "ĐIỀU KỲ DIỆU", "Thương hiệu thực dưỡng"] {
+            let c = corrupt_to_cp1252(s);
+            assert_ne!(c, s, "must differ: {}", s);
+            assert_eq!(repair_mojibake(&c), s, "round-trip failed: {}", s);
+        }
+    }
+
+    #[test]
+    fn test_repair_mojibake_segment_recovers_around_replacement_char() {
+        let input = format!("{} \u{FFFD} {}", corrupt_to_cp1252("Bạn"), corrupt_to_cp1252("đã"));
+        let out = repair_mojibake(&input);
+        assert!(out.starts_with("Bạn"), "left run not recovered: {}", out);
+        assert!(out.contains('\u{FFFD}'), "U+FFFD must be preserved: {}", out);
+        assert!(out.ends_with("đã"), "right run not recovered: {}", out);
+    }
+
+    #[test]
+    fn test_repair_mojibake_correct_text_never_altered() {
+        for s in ["ĐIỀU KỲ DIỆU", "Nội dung", "ÂM NHẠC", "Hello World 123"] {
+            assert_eq!(repair_mojibake(s), s);
+        }
+    }
+
+    #[test]
+    fn test_repair_mojibake_idempotent_general() {
+        let c = corrupt_to_cp1252("Bạn đã bao giờ");
+        let once = repair_mojibake(&c);
+        assert_eq!(repair_mojibake(&once), once);
+    }
+
+    #[test]
+    fn test_repair_mojibake_double_layer() {
+        let once = corrupt_to_cp1252("Bạn");
+        let twice = corrupt_to_cp1252(&once);
+        assert_ne!(twice, once);
+        assert_eq!(repair_mojibake(&twice), "Bạn");
+    }
+
+    #[test]
+    fn test_parse_ai_response_title_and_body_recovered_with_fffd() {
+        let content = format!(
+            "{}\n---\n{} \u{FFFD} {}",
+            corrupt_to_cp1252("NUTRIFRESH - CHĂM SÓC"),
+            corrupt_to_cp1252("Bạn đã"),
+            corrupt_to_cp1252("bao giờ")
+        );
+        let (title, body) = parse_ai_response(&content);
+        assert_eq!(title, "NUTRIFRESH - CHĂM SÓC");
+        assert!(body.contains("Bạn đã"));
+        assert!(body.contains("bao giờ"));
+        assert!(body.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn test_decode_response_bytes_strict_utf8_unchanged() {
+        let b = "Bạn đã".as_bytes();
+        let s = decode_response_bytes(b);
+        assert_eq!(s, "Bạn đã");
+        assert!(!s.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn test_decode_response_bytes_invalid_utf8_no_replacement_char() {
+        let s = decode_response_bytes(&[0x41, 0xE9, 0x42]); // invalid UTF-8; CP1252 => "AéB"
+        assert_eq!(s, "AéB");
+        assert!(!s.contains('\u{FFFD}'));
+    }
+
+    #[test]
+    fn test_decode_then_repair_pipeline() {
+        // Server returns valid UTF-8 bytes of the MOJIBAKE string "Báº¡n".
+        let raw = "Báº¡n".as_bytes();
+        let decoded = decode_response_bytes(raw);
+        assert_eq!(decoded, "Báº¡n");
+        assert_eq!(repair_mojibake(&decoded), "Bạn");
     }
 }

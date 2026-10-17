@@ -359,6 +359,7 @@ mod tests {
 }
 
 pub fn run() {
+    eprintln!("[FlowPost AI] ai.rs mojibake-repair {} active", ai::MOJIBAKE_REPAIR_VERSION);
     tauri::Builder::default()
         .setup(|app| {
             let handle = app.handle().clone();
