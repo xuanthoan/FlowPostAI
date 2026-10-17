@@ -2,6 +2,31 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-17 — Fix sửa bài viết ở Kho nội dung
+### Fixed
+- `src/App.jsx` — lỗi `update_content missing required key payload`: bọc tham số trong `{ payload: { contentId, title, body, prompt, style, customStyle, mediaIds } }` (khớp `save_content`)
+- `src/App.jsx` — kéo dãn textarea rồi thả chuột bị đóng preview: overlay chuyển từ `onClick` sang `onMouseDown` + guard `e.target === e.currentTarget` (chỉ đóng khi bấm trực tiếp ra nền)
+- `src/App.jsx` — lỗi `unknown variant Approved`: chuẩn hóa status về chữ thường `draft/approved/archived`; thêm `CONTENT_STATUS_LABELS`/`contentStatusLabel`; sửa filter ('all'), bộ đếm, badge, nút Duyệt/Lên lịch, dashboard `pending`
+- `e2e/schedule.spec.ts` — status literals chuyển về chữ thường cho khớp serde backend
+### Added
+- `src-tauri/src/content.rs` — 4 test: serialization lowercase tuyệt đối, deserialization đúng giá trị frontend (từ chối PascalCase), persisted JSON lowercase, `UpdateContentPayload` camelCase; thay test cũ quá dễ dãi
+### Verified
+- `cargo test --lib` 68 passed / 0 failed; `cargo check` 0 errors (7 warning dead-code có sẵn); `npm run build` OK (2394 modules). `npm run lint` bị chặn bởi quyền sandbox (chưa xác minh độc lập). Kiểm thử GUI thủ công (AC11) chưa chạy.
+
+## [Unreleased] - 2026-10-17 — AI content Facebook-ready formatting
+### Added
+- `src-tauri/src/content.rs` — `TITLE_BODY_SEPARATOR = "\n\n\n"` + `compose_facebook_post(title, body)` (ghép tiêu đề + 2 dòng trống + thân bài; xử lý rỗng) + 2 tests
+- `src-tauri/src/ai.rs` — `strip_markdown` (loại bỏ `#`/`**`/`*`/`_`/`` ` ``/`>`/bullet, không dùng regex); `build_system_message` thêm 5 quy tắc định dạng (plain text, KHÔNG markdown, tiêu đề IN HOA, cách 2 dòng); `parse_ai_response` chuẩn hóa title=UPPERCASE + strip markdown; thêm tests
+### Changed
+- `src-tauri/src/schedule.rs` — publish dùng `compose_facebook_post(&found.title, &found.body)` tại `read_content_with_media` + `read_content_body` (trước đây tiêu đề bị bỏ, chỉ đăng body)
+- `src/App.jsx` — preview body thêm `whiteSpace:'pre-line'` để giữ xuống dòng/2 dòng trống
+### Fixed
+- `###`/`**` hiển thị nguyên văn trên Facebook → nay AI bắt buộc plain text, có lớp phòng thủ strip markdown ở Rust
+- Tiêu đề không còn dính liền thân bài (trước đây newline bị gộp và tiêu đề không được đăng)
+- Gộp các fix pipeline AI có sẵn trong working tree: parse SSE streaming (`data:`/`[DONE]`), endpoint `/chat/completions` (tránh double suffix), `localhost`→`127.0.0.1` (tránh IPv6), `AI_TIMEOUT_SECS` 120s, log lỗi; `providers.rs` base URL `127.0.0.1` + `.http1_only()`
+### Verified
+- `cargo test --lib` 65 passed / 0 failed; `cargo check` 0 errors; `npm run build` OK (2394 modules). `npm run lint` bị chặn bởi quyền công cụ (chưa xác minh độc lập trong phiên QA).
+
 ## [1be13e2] - 2026-09-05 — B1 CI + lint fixes
 ### Added
 - `.github/workflows/ci.yml` — single-job CI (ubuntu-latest, Node 20, npm ci, lint, build, Rust stable + cargo check/test, Playwright E2E_MOCK 19 tests, Vite dev server, upload artifact on failure)

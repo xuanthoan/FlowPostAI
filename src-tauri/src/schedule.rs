@@ -459,7 +459,7 @@ fn read_content_body(app: &AppHandle, content_id: &str) -> Result<String, String
     let items: Vec<crate::content::ContentItem> =
         serde_json::from_str(&contents).map_err(|e| e.to_string())?;
     let found = items.into_iter().find(|c| c.id == content_id).ok_or_else(|| format!("Không tìm thấy nội dung {}", content_id))?;
-    Ok(found.body)
+    Ok(crate::content::compose_facebook_post(&found.title, &found.body))
 }
 
 fn resolve_first_image_path(app: &AppHandle, media_ids: &[String]) -> Option<String> {
@@ -525,7 +525,7 @@ fn read_content_with_media(app: &AppHandle, content_id: &str) -> Result<(String,
         serde_json::from_str(&contents).map_err(|e| e.to_string())?;
     let found = items.into_iter().find(|c| c.id == content_id).ok_or_else(|| format!("Không tìm thấy nội dung {}", content_id))?;
     let image_path = resolve_first_image_path(app, &found.media_ids);
-    Ok((found.body, image_path))
+    Ok((crate::content::compose_facebook_post(&found.title, &found.body), image_path))
 }
 
 #[cfg(test)]

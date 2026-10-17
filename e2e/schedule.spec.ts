@@ -10,7 +10,7 @@ window.__TAURI_INTERNALS__ = {};
   let mockSelectedPageId = null;
   let mockConfig = { intervalSeconds: 30, enabled: true, selectedPageId: null };
   window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
-    const baseUrl = 'http://localhost:20128/v1';
+    const baseUrl = 'http://127.0.0.1:20128/v1';
     switch (cmd) {
       case 'list_providers':
         return [{ id: 'custom-provider', displayName: 'Custom provider', baseUrl: baseUrl, protocol: 'openai-completions', models: ['xoay-vong-worker-web-128k'], hasApiKey: true }];
@@ -41,7 +41,7 @@ window.__TAURI_INTERNALS__ = {};
         const p = args?.payload;
         if (!p?.prompt?.trim()) throw new Error('Prompt không được để trống');
         if (!p?.title?.trim() && !p?.body?.trim()) throw new Error('Tiêu đề hoặc nội dung không được để trống');
-        const item = { id: 'c_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), title: p.title, body: p.body, prompt: p.prompt, style: p.style, customStyle: p.customStyle || null, mediaIds: p.mediaIds || [], status: 'Draft', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+        const item = { id: 'c_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), title: p.title, body: p.body, prompt: p.prompt, style: p.style, customStyle: p.customStyle || null, mediaIds: p.mediaIds || [], status: 'draft', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
         mockContents.push(item);
         return item;
       }
@@ -73,7 +73,7 @@ window.__TAURI_INTERNALS__ = {};
         if (scheduledAt <= new Date(Date.now() + 5*60*1000)) throw new Error('Thời gian lên lịch phải trong tương lai (tối thiểu 5 phút)');
         const content = mockContents.find(c => c.id === p.contentId);
         if (!content) throw new Error('Không tìm thấy nội dung ' + p.contentId);
-        if (content.status !== 'Approved') throw new Error('Chỉ nội dung đã duyệt mới được lên lịch');
+        if (content.status !== 'approved') throw new Error('Chỉ nội dung đã duyệt mới được lên lịch');
         const resolvedPageId = (p.pageId || p.page_id || (p.pages && p.pages[0]) || '').trim();
         const now = new Date().toISOString();
         const item = { id: 's_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), contentId: p.contentId, scheduledAt: scheduledAt.toISOString(), platform: p.platform.trim(), pages: p.pages || [], pageId: resolvedPageId || null, status: 'Scheduled', retryCount: 0, lastError: null, createdAt: now, updatedAt: now };
@@ -157,7 +157,7 @@ test.describe('Schedule E2E (mock)', () => {
 
   test('create_schedule should succeed for Approved content', async ({ page }) => {
     const saved: any = await invoke(page, 'save_content', { payload: { title: 'Test', body: 'Body', prompt: 'prompt', style: 'Viral', customStyle: null, mediaIds: [] } });
-    await invoke(page, 'update_content_status', { id: saved.id, status: 'Approved' });
+    await invoke(page, 'update_content_status', { id: saved.id, status: 'approved' });
     const future = new Date(Date.now() + 10 * 60 * 1000).toISOString();
     const item: any = await invoke(page, 'create_schedule', { payload: { contentId: saved.id, scheduledAt: future, platform: 'Sống Tích Cực', pageId: '111', pages: ['111'] } });
     expect(item.status).toBe('Scheduled');
@@ -182,7 +182,7 @@ test.describe('Schedule E2E (mock)', () => {
 
   test('create_schedule should fail if scheduledAt < now+5m', async ({ page }) => {
     const saved: any = await invoke(page, 'save_content', { payload: { title: 'Test', body: 'Body', prompt: 'prompt', style: 'Viral', customStyle: null, mediaIds: [] } });
-    await invoke(page, 'update_content_status', { id: saved.id, status: 'Approved' });
+    await invoke(page, 'update_content_status', { id: saved.id, status: 'approved' });
     const soon = new Date(Date.now() + 1 * 60 * 1000).toISOString();
     try {
       await invoke(page, 'create_schedule', { payload: { contentId: saved.id, scheduledAt: soon, platform: 'Sống Tích Cực', pageId: '111', pages: ['111'] } });
@@ -195,7 +195,7 @@ test.describe('Schedule E2E (mock)', () => {
 
   test('reschedule should move time', async ({ page }) => {
     const saved: any = await invoke(page, 'save_content', { payload: { title: 'Test', body: 'Body', prompt: 'prompt', style: 'Viral', customStyle: null, mediaIds: [] } });
-    await invoke(page, 'update_content_status', { id: saved.id, status: 'Approved' });
+    await invoke(page, 'update_content_status', { id: saved.id, status: 'approved' });
     const future = new Date(Date.now() + 10 * 60 * 1000).toISOString();
     const item: any = await invoke(page, 'create_schedule', { payload: { contentId: saved.id, scheduledAt: future, platform: 'Sống Tích Cực', pageId: '111', pages: ['111'] } });
     const newTime = new Date(Date.now() + 20 * 60 * 1000).toISOString();
@@ -207,7 +207,7 @@ test.describe('Schedule E2E (mock)', () => {
 
   test('update_schedule_status Cancelled should persist', async ({ page }) => {
     const saved: any = await invoke(page, 'save_content', { payload: { title: 'Test', body: 'Body', prompt: 'prompt', style: 'Viral', customStyle: null, mediaIds: [] } });
-    await invoke(page, 'update_content_status', { id: saved.id, status: 'Approved' });
+    await invoke(page, 'update_content_status', { id: saved.id, status: 'approved' });
     const future = new Date(Date.now() + 10 * 60 * 1000).toISOString();
     const item: any = await invoke(page, 'create_schedule', { payload: { contentId: saved.id, scheduledAt: future, platform: 'Sống Tích Cực', pageId: '111', pages: ['111'] } });
     const updated: any = await invoke(page, 'update_schedule_status', { id: item.id, status: 'Cancelled' });

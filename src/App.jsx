@@ -82,7 +82,7 @@ function ProvidersPanel() {
   const desktop = isDesktop()
   const [providers, setProviders] = useState([])
   const [activeId, setActiveId] = useState('')
-  const [form, setForm] = useState({ id: 'custom-provider', displayName: 'Custom provider', baseUrl: 'http://localhost:20128/v1', protocol: 'openai-completions', apiKey: '', models: [] })
+  const [form, setForm] = useState({ id: 'custom-provider', displayName: 'Custom provider', baseUrl: 'http://127.0.0.1:20128/v1', apiKey: '', models: [] })
   const [hasApiKey, setHasApiKey] = useState(false)
   const [modelInput, setModelInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -102,7 +102,7 @@ function ProvidersPanel() {
           const found = list.find(p => p.id === a.id)
           if (found) active = found
         } catch (_e) { void _e }
-        setForm({ id: active.id, displayName: active.displayName || active.id, baseUrl: active.baseUrl, protocol: active.protocol, apiKey: '', models: active.models || [] })
+        setForm({ id: active.id, displayName: active.displayName || active.id, baseUrl: active.baseUrl, apiKey: '', models: active.models || [] })
         setHasApiKey(!!active.hasApiKey)
         setIsEditing(true)
       } else {
@@ -115,14 +115,14 @@ function ProvidersPanel() {
   const selectProvider = (id) => {
     const p = providers.find(x => x.id === id)
     if (!p) return
-    setForm({ id: p.id, displayName: p.displayName || p.id, baseUrl: p.baseUrl, protocol: p.protocol, apiKey: '', models: p.models || [] })
+    setForm({ id: p.id, displayName: p.displayName || p.id, baseUrl: p.baseUrl, apiKey: '', models: p.models || [] })
     setHasApiKey(!!p.hasApiKey)
     setIsEditing(true)
     setErr(''); setMsg('')
   }
 
   const handleAddNew = () => {
-    setForm({ id: '', displayName: '', baseUrl: 'http://localhost:20128/v1', protocol: 'openai-completions', apiKey: '', models: [] })
+    setForm({ id: '', displayName: '', baseUrl: 'http://127.0.0.1:20128/v1', apiKey: '', models: [] })
     setHasApiKey(false)
     setIsEditing(false)
     setErr(''); setMsg('')
@@ -136,11 +136,11 @@ function ProvidersPanel() {
     setBusy(true); setErr(''); setMsg('')
     try {
       if (!isEditing) {
-        const payload = { id: form.id.trim().toLowerCase(), displayName: form.displayName || null, baseUrl: form.baseUrl, protocol: form.protocol, models: form.models.length ? form.models : null, apiKey: form.apiKey || null }
+        const payload = { id: form.id.trim().toLowerCase(), displayName: form.displayName || null, baseUrl: form.baseUrl, protocol: 'openai-completions', models: form.models.length ? form.models : null, apiKey: form.apiKey || null }
         await invokeDesktop('create_provider', { payload })
         setMsg('Đã tạo provider')
       } else {
-        const payload = { displayName: form.displayName || null, baseUrl: form.baseUrl, protocol: form.protocol, models: form.models, apiKey: form.apiKey || null }
+        const payload = { displayName: form.displayName || null, baseUrl: form.baseUrl, protocol: 'openai-completions', models: form.models, apiKey: form.apiKey || null }
         await invokeDesktop('update_provider', { id: form.id, payload })
         setMsg('Đã cập nhật provider')
       }
@@ -175,7 +175,7 @@ function ProvidersPanel() {
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}><strong style={{fontSize:14}}>Danh sách Providers ({providers.length})</strong><button className="outline" onClick={handleAddNew} disabled={!desktop||busy} style={{height:30, fontSize:13}}><Plus size={12}/> Thêm Provider</button></div>
       <div style={{display:'flex', flexDirection:'column', gap:6}}>
         {providers.map(p=> <div key={p.id} onClick={()=>selectProvider(p.id)} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 10px', border: p.id===form.id ? '2px solid #6558d6' : '1px solid #e8e8ed', borderRadius:8, background: p.id===activeId ? '#f0eefc' : '#fff', cursor:'pointer'}}>
-          <div style={{display:'flex', alignItems:'center', gap:8}}><strong style={{fontSize:13}}>{p.displayName || p.id}</strong><span style={{fontSize:11, background: p.id===activeId ? '#6558d6' : '#eee', color: p.id===activeId ? '#fff' : '#666', padding:'2px 6px', borderRadius:10}}>{p.protocol}</span><span style={{width:8, height:8, borderRadius:8, background: p.hasApiKey ? '#4caf50' : '#ccc', display:'inline-block'}} title={p.hasApiKey ? 'Đã lưu API key' : 'Chưa có key'}/><span style={{fontSize:11, color:'#777'}}>{p.id}</span></div>
+          <div style={{display:'flex', alignItems:'center', gap:8}}><strong style={{fontSize:13}}>{p.displayName || p.id}</strong><span style={{width:8, height:8, borderRadius:8, background: p.hasApiKey ? '#4caf50' : '#ccc', display:'inline-block'}} title={p.hasApiKey ? 'Đã lưu API key' : 'Chưa có key'}/><span style={{fontSize:11, color:'#777'}}>{p.id}</span></div>
           <span style={{fontSize:11, color: p.id===activeId ? '#6558d6' : '#999'}}>{p.id===activeId ? '● active' : ''} {p.id===form.id ? '● đang sửa' : ''}</span>
         </div>)}
       </div>
@@ -201,15 +201,7 @@ function ProvidersPanel() {
         </div>
         <div>
           <label style={{fontSize:13, fontWeight:700}}>Base URL</label>
-          <input value={form.baseUrl} onChange={e=>setForm(f=>({...f, baseUrl:e.target.value}))} disabled={busy} placeholder="https://gateway.example/v1" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
-        </div>
-        <div>
-          <label style={{fontSize:13, fontWeight:700}}>API protocol</label>
-          <select value={form.protocol} onChange={e=>setForm(f=>({...f, protocol:e.target.value}))} disabled={busy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:6, fontSize:14}}>
-            <option value="openai-completions">openai-completions</option>
-            <option value="openai-responses">openai-responses</option>
-            <option value="anthropic-messages">anthropic-messages</option>
-          </select>
+          <input value={form.baseUrl} onChange={e=>setForm(f=>({...f, baseUrl:e.target.value}))} disabled={busy} placeholder="Full endpoint URL e.g. https://api.example.com/v1/chat/completions" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
         </div>
         <div>
           <label style={{fontSize:13, fontWeight:700}}>API key</label>
@@ -646,10 +638,13 @@ function PublishModal({ onClose, onSuccess }) {
   )
 }
 
+const CONTENT_STATUS_LABELS = { draft: 'Nháp', approved: 'Đã duyệt', archived: 'Lưu trữ' }
+const contentStatusLabel = (s) => CONTENT_STATUS_LABELS[s] || s
+
 function ContentWarehousePage() {
   const desktop = isDesktop()
   const [items, setItems] = useState([])
-  const [filter, setFilter] = useState('Tất cả')
+  const [filter, setFilter] = useState('all')
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -673,11 +668,11 @@ function ContentWarehousePage() {
     try { await invokeDesktop('delete_content', { id }); await refresh() } catch (e) { setErr(String(e)) }
   }
   const approve = async (id) => {
-    try { await invokeDesktop('update_content_status', { id, status: 'Approved' }); await refresh() } catch (e) { setErr(String(e)) }
+    try { await invokeDesktop('update_content_status', { id, status: 'approved' }); await refresh() } catch (e) { setErr(String(e)) }
   }
 
   const filtered = items.filter(it => {
-    if (filter !== 'Tất cả' && it.status !== filter) return false
+    if (filter !== 'all' && it.status !== filter) return false
     if (query && !`${it.title} ${it.body} ${it.prompt}`.toLowerCase().includes(query.toLowerCase())) return false
     return true
   })
@@ -692,30 +687,30 @@ function ContentWarehousePage() {
     {err && <div className="error-box">{err}</div>}
     <div className="media-summary" style={{flexWrap:'wrap'}}>
       <div><FileText size={18}/><span><b>{items.length}</b> tổng</span></div>
-      <div><CircleCheck size={18}/><span><b>{items.filter(i=>i.status==='Draft').length}</b> nháp</span></div>
-      <div><Zap size={18}/><span><b>{items.filter(i=>i.status==='Approved').length}</b> đã duyệt</span></div>
+      <div><CircleCheck size={18}/><span><b>{items.filter(i=>i.status==='draft').length}</b> nháp</span></div>
+      <div><Zap size={18}/><span><b>{items.filter(i=>i.status==='approved').length}</b> đã duyệt</span></div>
       <div style={{flex:1, minWidth:160}}><Search size={14}/><input placeholder="Tìm theo tiêu đề, prompt..." value={query} onChange={e=>setQuery(e.target.value)} style={{border:0, outline:0, background:'transparent', flex:1, fontSize:14, width:'100%'}}/></div>
     </div>
     <div style={{display:'flex', gap:8, marginBottom:14}}>
-      {['Tất cả','Draft','Approved','Archived'].map(f => <button key={f} onClick={()=>setFilter(f)} className={filter===f ? 'primary' : 'outline'} style={{height:32, fontSize:14}}>{f}</button>)}
+      {[['all','Tất cả'],['draft','Draft'],['approved','Approved'],['archived','Archived']].map(([value,label]) => <button key={value} onClick={()=>setFilter(value)} className={filter===value ? 'primary' : 'outline'} style={{height:32, fontSize:14}}>{label}</button>)}
     </div>
     {filtered.length ? <div style={{display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:14}}>{filtered.map(it => <article key={it.id} className="panel" style={{padding:14, display:'flex', flexDirection:'column', gap:8}}>
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
         <span style={{fontSize:12, fontWeight:800, color: it.style==='Custom' ? '#d87642' : '#6558d6', background: it.style==='Custom' ? '#fff0e6' : '#f0eefc', padding:'3px 7px', borderRadius:10}}>{it.style}{it.customStyle ? `:${it.customStyle}` : ''}</span>
-        <span style={{fontSize:12, color: it.status==='Approved' ? '#2e7d32' : '#777', background: it.status==='Approved' ? '#e8f5e9' : '#f5f5f5', padding:'3px 7px', borderRadius:10}}>{it.status}</span>
+        <span style={{fontSize:12, color: it.status==='approved' ? '#2e7d32' : '#777', background: it.status==='approved' ? '#e8f5e9' : '#f5f5f5', padding:'3px 7px', borderRadius:10}}>{contentStatusLabel(it.status)}</span>
       </div>
       <strong style={{fontSize:14, lineHeight:1.4}}>{it.title}</strong>
-      <span style={{fontSize:13, color:'#555', display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical', overflow:'hidden'}}>{it.body}</span>
+      <span style={{fontSize:13, color:'#555', display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical', overflow:'hidden', whiteSpace:'pre-line'}}>{it.body}</span>
       <span style={{fontSize:12, color:'#888'}}>Prompt: {it.prompt} • {formatDate(it.createdAt)} • {it.mediaIds?.length || 0} media</span>
       <div style={{display:'flex', gap:8, marginTop:4, flexWrap:'wrap'}}>
-        <button className="outline" onClick={()=>approve(it.id)} disabled={it.status==='Approved' || busy} style={{height:30, fontSize:13}}><CircleCheck size={12}/> Duyệt</button>
-        <button className="primary" onClick={()=>setScheduleFor(it.id)} disabled={it.status!=='Approved' || busy} title={it.status!=='Approved' ? 'Hãy duyệt trước' : ''} style={{height:30, fontSize:13}}><CalendarDays size={12}/> Lên lịch</button>
+        <button className="outline" onClick={()=>approve(it.id)} disabled={it.status==='approved' || busy} style={{height:30, fontSize:13}}><CircleCheck size={12}/> Duyệt</button>
+        <button className="primary" onClick={()=>setScheduleFor(it.id)} disabled={it.status!=='approved' || busy} title={it.status!=='approved' ? 'Hãy duyệt trước' : ''} style={{height:30, fontSize:13}}><CalendarDays size={12}/> Lên lịch</button>
         <button className="outline" onClick={()=>remove(it.id)} disabled={busy} style={{height:30, fontSize:13}}><Trash2 size={12}/> Xóa</button>
         <button className="outline" onClick={()=>setEditing({...it})} disabled={busy} style={{height:30, fontSize:13}}><Pencil size={12}/> Sửa</button>
       </div>
     </article>)}</div> : <div className="media-empty"><div><FileText size={34}/></div><h2>{items.length===0 ? 'Kho nội dung đang trống' : 'Không có kết quả'}</h2><p>{items.length===0 ? 'Hãy tạo nội dung ở AI Content và Lưu vào kho.' : 'Thử đổi bộ lọc hoặc từ khóa.'}</p></div>}
     {scheduleFor && <ScheduleModal contentId={scheduleFor} onClose={()=>setScheduleFor(null)} onCreated={refresh} />}
-    {editing && <div className="modal-overlay" onClick={()=>setEditing(null)} style={{position:'fixed', inset:0, background:'#0008', display:'grid', placeItems:'center', zIndex:50}}>
+    {editing && <div className="modal-overlay" onMouseDown={e=>{ if (e.target === e.currentTarget) setEditing(null) }} style={{position:'fixed', inset:0, background:'#0008', display:'grid', placeItems:'center', zIndex:50}}>
       <div className="modal" onClick={e=>e.stopPropagation()} style={{maxWidth:600, width:'90%', background:'#fff', borderRadius:12, padding:20, boxShadow:'0 8px 30px rgba(0,0,0,.2)'}}>
         <h2 style={{margin:0, fontSize:17}}>Sửa nội dung</h2>
         <div style={{display:'flex', flexDirection:'column', gap:10, marginTop:14}}>
@@ -730,9 +725,11 @@ function ContentWarehousePage() {
               setBusy(true); setErr('')
               try {
                 await invokeDesktop('update_content', {
-                  contentId: editing.id, title: editing.title, body: editing.body,
-                  prompt: editing.prompt, style: editing.style, customStyle: editing.customStyle || null,
-                  mediaIds: editing.mediaIds || []
+                  payload: {
+                    contentId: editing.id, title: editing.title, body: editing.body,
+                    prompt: editing.prompt, style: editing.style, customStyle: editing.customStyle || null,
+                    mediaIds: editing.mediaIds || []
+                  }
                 })
                 setEditing(null); await refresh()
               } catch (e) { setErr(String(e)) } finally { setBusy(false) }
@@ -958,7 +955,7 @@ function App() {
         // Recent posts: 3 mới nhất từ content (fallback khi chưa có insights)
         let recent = [...contents].sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt)).slice(0,3).map((c,i) => ({
           title: c.title, page: c.style, date: new Date(c.createdAt).toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}),
-          type: c.mediaIds && c.mediaIds.length ? 'Ảnh + văn bản' : 'Văn bản', status: c.status, color: ['#f0a86e','#7469d5','#4b9b7d'][i%3], initials: c.style.slice(0,2).toUpperCase(), reach: '—', likes: '—', comments: '—', pending: c.status !== 'Approved', tooltip: '', tooltipData: { impressions:'—', unique:'—', engaged:'—', clicks:'—', reactions:'—', videoViews:'—' }
+          type: c.mediaIds && c.mediaIds.length ? 'Ảnh + văn bản' : 'Văn bản', status: contentStatusLabel(c.status), color: ['#f0a86e','#7469d5','#4b9b7d'][i%3], initials: c.style.slice(0,2).toUpperCase(), reach: '—', likes: '—', comments: '—', pending: c.status !== 'approved', tooltip: '', tooltipData: { impressions:'—', unique:'—', engaged:'—', clicks:'—', reactions:'—', videoViews:'—' }
         }))
         setDashboardRecent(recent)
         setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights'); setDashboardEngagementRate('—')

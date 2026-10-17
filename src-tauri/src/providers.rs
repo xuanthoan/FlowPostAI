@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, Runtime};
 
-pub const DEFAULT_BASE_URL: &str = "http://localhost:20128/v1";
+pub const DEFAULT_BASE_URL: &str = "http://127.0.0.1:20128/v1";
 pub const DEFAULT_MODEL: &str = "xoay-vong-worker-web-128k";
 pub const DEFAULT_PROVIDER_ID: &str = "custom-provider";
 pub const DEFAULT_DISPLAY_NAME: &str = "Custom provider";
@@ -426,10 +426,11 @@ pub async fn fetch_provider_models(app: AppHandle, id: String) -> Result<Vec<Str
     if key.trim().is_empty() {
         return Err("API key trống".into());
     }
-    let base = provider.base_url.trim_end_matches('/').to_string();
-    let url = format!("{}/models", base);
+    let base = provider.base_url.trim_end_matches('/').replace("localhost", "127.0.0.1").to_string();
+    let url = base.clone();
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
+        .http1_only()
         .build()
         .map_err(|e| format!("Không thể khởi tạo HTTP client: {}", e))?;
     let resp = client
@@ -521,7 +522,7 @@ mod tests {
 
     #[test]
     fn test_validate_base_url() {
-        assert!(validate_base_url("http://localhost:20128/v1").is_ok());
+        assert!(validate_base_url("http://127.0.0.1:20128/v1").is_ok());
         assert!(validate_base_url("https://gateway.example/v1").is_ok());
         assert!(validate_base_url("").is_err());
         assert!(validate_base_url("ftp://example.com").is_err());

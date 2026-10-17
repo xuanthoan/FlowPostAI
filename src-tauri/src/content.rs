@@ -35,6 +35,19 @@ pub struct ContentItem {
     pub updated_at: DateTime<Utc>,
 }
 
+pub const TITLE_BODY_SEPARATOR: &str = "\n\n\n";
+
+pub fn compose_facebook_post(title: &str, body: &str) -> String {
+    let t = title.trim();
+    let b = body.trim();
+    match (t.is_empty(), b.is_empty()) {
+        (false, false) => format!("{}{}{}", t, TITLE_BODY_SEPARATOR, b),
+        (false, true) => t.to_string(),
+        (true, false) => b.to_string(),
+        (true, true) => String::new(),
+    }
+}
+
 fn content_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -266,12 +279,50 @@ mod tests {
     }
 
     #[test]
-    fn test_content_status_serialization() {
-        let item = sample_item("id1", "Test");
+    fn test_content_status_serialization_is_lowercase_canonical() {
+        assert_eq!(serde_json::to_string(&ContentStatus::Draft).unwrap(), "\"draft\"");
+        assert_eq!(serde_json::to_string(&ContentStatus::Approved).unwrap(), "\"approved\"");
+        assert_eq!(serde_json::to_string(&ContentStatus::Archived).unwrap(), "\"archived\"");
+    }
+
+    #[test]
+    fn test_content_status_deserializes_exact_frontend_values() {
+        let draft: ContentStatus = serde_json::from_str("\"draft\"").unwrap();
+        let approved: ContentStatus = serde_json::from_str("\"approved\"").unwrap();
+        let archived: ContentStatus = serde_json::from_str("\"archived\"").unwrap();
+        assert_eq!(draft, ContentStatus::Draft);
+        assert_eq!(approved, ContentStatus::Approved);
+        assert_eq!(archived, ContentStatus::Archived);
+        assert!(
+            serde_json::from_str::<ContentStatus>("\"Approved\"").is_err(),
+            "PascalCase must be rejected so frontend/backend casing drift is caught"
+        );
+    }
+
+    #[test]
+    fn test_content_status_persisted_json_uses_lowercase() {
+        let mut item = sample_item("id-status", "Title");
+        item.status = ContentStatus::Approved;
         let json = serde_json::to_string(&item).unwrap();
-        assert!(json.contains("\"draft\"") || json.contains("\"Draft\"") || json.contains("draft"));
+        assert!(json.contains("\"status\":\"approved\""), "persisted status must be lowercase, got {}", json);
         let parsed: ContentItem = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.status, ContentStatus::Draft);
+        assert_eq!(parsed.status, ContentStatus::Approved);
+    }
+
+    #[test]
+    fn test_update_content_payload_deserializes_frontend_camel_case() {
+        let json = serde_json::json!({
+            "contentId": "c1", "title": "T", "body": "B", "prompt": "P",
+            "style": "Viral", "customStyle": null, "mediaIds": ["m1", "m2"]
+        });
+        let p: UpdateContentPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(p.content_id, "c1");
+        assert_eq!(p.title, "T");
+        assert_eq!(p.body, "B");
+        assert_eq!(p.prompt, "P");
+        assert_eq!(p.style, "Viral");
+        assert_eq!(p.custom_style, None);
+        assert_eq!(p.media_ids, Some(vec!["m1".into(), "m2".into()]));
     }
 
     #[test]
@@ -355,5 +406,20 @@ mod tests {
         assert!(pos.is_none(), "Non-existent id should not be found");
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_compose_facebook_post_full() {
+        assert_eq!(
+            compose_facebook_post("TIN HOT", "Thân bài"),
+            "TIN HOT\n\n\nThân bài"
+        );
+    }
+
+    #[test]
+    fn test_compose_facebook_post_empty_parts() {
+        assert_eq!(compose_facebook_post("TIN", ""), "TIN");
+        assert_eq!(compose_facebook_post("", "Thân"), "Thân");
+        assert_eq!(compose_facebook_post("", ""), "");
     }
 }

@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { invoke, isTauri } from './helpers/tauri';
 import { ensureProvider, DEFAULT_MODEL } from './helpers/provider';
 
-const BASE_URL = process.env.E2E_BASE_URL || 'http://localhost:20128/v1';
+const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:20128/v1';
 
 const mockImplCode = `
 window.__TAURI_MOCK__ = true;
@@ -111,7 +111,7 @@ test.describe('Providers E2E (real server)', () => {
       await invoke(page, 'create_provider', {
         payload: {
           id: 'Invalid_ID',
-          baseUrl: 'http://localhost:20128/v1',
+          baseUrl: 'http://127.0.0.1:20128/v1',
           protocol: 'openai-completions',
           models: [DEFAULT_MODEL],
           apiKey: 'dummy',
