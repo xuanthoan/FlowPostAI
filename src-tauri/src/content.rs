@@ -279,12 +279,50 @@ mod tests {
     }
 
     #[test]
-    fn test_content_status_serialization() {
-        let item = sample_item("id1", "Test");
+    fn test_content_status_serialization_is_lowercase_canonical() {
+        assert_eq!(serde_json::to_string(&ContentStatus::Draft).unwrap(), "\"draft\"");
+        assert_eq!(serde_json::to_string(&ContentStatus::Approved).unwrap(), "\"approved\"");
+        assert_eq!(serde_json::to_string(&ContentStatus::Archived).unwrap(), "\"archived\"");
+    }
+
+    #[test]
+    fn test_content_status_deserializes_exact_frontend_values() {
+        let draft: ContentStatus = serde_json::from_str("\"draft\"").unwrap();
+        let approved: ContentStatus = serde_json::from_str("\"approved\"").unwrap();
+        let archived: ContentStatus = serde_json::from_str("\"archived\"").unwrap();
+        assert_eq!(draft, ContentStatus::Draft);
+        assert_eq!(approved, ContentStatus::Approved);
+        assert_eq!(archived, ContentStatus::Archived);
+        assert!(
+            serde_json::from_str::<ContentStatus>("\"Approved\"").is_err(),
+            "PascalCase must be rejected so frontend/backend casing drift is caught"
+        );
+    }
+
+    #[test]
+    fn test_content_status_persisted_json_uses_lowercase() {
+        let mut item = sample_item("id-status", "Title");
+        item.status = ContentStatus::Approved;
         let json = serde_json::to_string(&item).unwrap();
-        assert!(json.contains("\"draft\"") || json.contains("\"Draft\"") || json.contains("draft"));
+        assert!(json.contains("\"status\":\"approved\""), "persisted status must be lowercase, got {}", json);
         let parsed: ContentItem = serde_json::from_str(&json).unwrap();
-        assert_eq!(parsed.status, ContentStatus::Draft);
+        assert_eq!(parsed.status, ContentStatus::Approved);
+    }
+
+    #[test]
+    fn test_update_content_payload_deserializes_frontend_camel_case() {
+        let json = serde_json::json!({
+            "contentId": "c1", "title": "T", "body": "B", "prompt": "P",
+            "style": "Viral", "customStyle": null, "mediaIds": ["m1", "m2"]
+        });
+        let p: UpdateContentPayload = serde_json::from_value(json).unwrap();
+        assert_eq!(p.content_id, "c1");
+        assert_eq!(p.title, "T");
+        assert_eq!(p.body, "B");
+        assert_eq!(p.prompt, "P");
+        assert_eq!(p.style, "Viral");
+        assert_eq!(p.custom_style, None);
+        assert_eq!(p.media_ids, Some(vec!["m1".into(), "m2".into()]));
     }
 
     #[test]

@@ -2,6 +2,17 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-17 — Fix sửa bài viết ở Kho nội dung
+### Fixed
+- `src/App.jsx` — lỗi `update_content missing required key payload`: bọc tham số trong `{ payload: { contentId, title, body, prompt, style, customStyle, mediaIds } }` (khớp `save_content`)
+- `src/App.jsx` — kéo dãn textarea rồi thả chuột bị đóng preview: overlay chuyển từ `onClick` sang `onMouseDown` + guard `e.target === e.currentTarget` (chỉ đóng khi bấm trực tiếp ra nền)
+- `src/App.jsx` — lỗi `unknown variant Approved`: chuẩn hóa status về chữ thường `draft/approved/archived`; thêm `CONTENT_STATUS_LABELS`/`contentStatusLabel`; sửa filter ('all'), bộ đếm, badge, nút Duyệt/Lên lịch, dashboard `pending`
+- `e2e/schedule.spec.ts` — status literals chuyển về chữ thường cho khớp serde backend
+### Added
+- `src-tauri/src/content.rs` — 4 test: serialization lowercase tuyệt đối, deserialization đúng giá trị frontend (từ chối PascalCase), persisted JSON lowercase, `UpdateContentPayload` camelCase; thay test cũ quá dễ dãi
+### Verified
+- `cargo test --lib` 68 passed / 0 failed; `cargo check` 0 errors (7 warning dead-code có sẵn); `npm run build` OK (2394 modules). `npm run lint` bị chặn bởi quyền sandbox (chưa xác minh độc lập). Kiểm thử GUI thủ công (AC11) chưa chạy.
+
 ## [Unreleased] - 2026-10-17 — AI content Facebook-ready formatting
 ### Added
 - `src-tauri/src/content.rs` — `TITLE_BODY_SEPARATOR = "\n\n\n"` + `compose_facebook_post(title, body)` (ghép tiêu đề + 2 dòng trống + thân bài; xử lý rỗng) + 2 tests

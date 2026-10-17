@@ -638,10 +638,13 @@ function PublishModal({ onClose, onSuccess }) {
   )
 }
 
+const CONTENT_STATUS_LABELS = { draft: 'Nháp', approved: 'Đã duyệt', archived: 'Lưu trữ' }
+const contentStatusLabel = (s) => CONTENT_STATUS_LABELS[s] || s
+
 function ContentWarehousePage() {
   const desktop = isDesktop()
   const [items, setItems] = useState([])
-  const [filter, setFilter] = useState('Tất cả')
+  const [filter, setFilter] = useState('all')
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -665,11 +668,11 @@ function ContentWarehousePage() {
     try { await invokeDesktop('delete_content', { id }); await refresh() } catch (e) { setErr(String(e)) }
   }
   const approve = async (id) => {
-    try { await invokeDesktop('update_content_status', { id, status: 'Approved' }); await refresh() } catch (e) { setErr(String(e)) }
+    try { await invokeDesktop('update_content_status', { id, status: 'approved' }); await refresh() } catch (e) { setErr(String(e)) }
   }
 
   const filtered = items.filter(it => {
-    if (filter !== 'Tất cả' && it.status !== filter) return false
+    if (filter !== 'all' && it.status !== filter) return false
     if (query && !`${it.title} ${it.body} ${it.prompt}`.toLowerCase().includes(query.toLowerCase())) return false
     return true
   })
@@ -684,30 +687,30 @@ function ContentWarehousePage() {
     {err && <div className="error-box">{err}</div>}
     <div className="media-summary" style={{flexWrap:'wrap'}}>
       <div><FileText size={18}/><span><b>{items.length}</b> tổng</span></div>
-      <div><CircleCheck size={18}/><span><b>{items.filter(i=>i.status==='Draft').length}</b> nháp</span></div>
-      <div><Zap size={18}/><span><b>{items.filter(i=>i.status==='Approved').length}</b> đã duyệt</span></div>
+      <div><CircleCheck size={18}/><span><b>{items.filter(i=>i.status==='draft').length}</b> nháp</span></div>
+      <div><Zap size={18}/><span><b>{items.filter(i=>i.status==='approved').length}</b> đã duyệt</span></div>
       <div style={{flex:1, minWidth:160}}><Search size={14}/><input placeholder="Tìm theo tiêu đề, prompt..." value={query} onChange={e=>setQuery(e.target.value)} style={{border:0, outline:0, background:'transparent', flex:1, fontSize:14, width:'100%'}}/></div>
     </div>
     <div style={{display:'flex', gap:8, marginBottom:14}}>
-      {['Tất cả','Draft','Approved','Archived'].map(f => <button key={f} onClick={()=>setFilter(f)} className={filter===f ? 'primary' : 'outline'} style={{height:32, fontSize:14}}>{f}</button>)}
+      {[['all','Tất cả'],['draft','Draft'],['approved','Approved'],['archived','Archived']].map(([value,label]) => <button key={value} onClick={()=>setFilter(value)} className={filter===value ? 'primary' : 'outline'} style={{height:32, fontSize:14}}>{label}</button>)}
     </div>
     {filtered.length ? <div style={{display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:14}}>{filtered.map(it => <article key={it.id} className="panel" style={{padding:14, display:'flex', flexDirection:'column', gap:8}}>
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
         <span style={{fontSize:12, fontWeight:800, color: it.style==='Custom' ? '#d87642' : '#6558d6', background: it.style==='Custom' ? '#fff0e6' : '#f0eefc', padding:'3px 7px', borderRadius:10}}>{it.style}{it.customStyle ? `:${it.customStyle}` : ''}</span>
-        <span style={{fontSize:12, color: it.status==='Approved' ? '#2e7d32' : '#777', background: it.status==='Approved' ? '#e8f5e9' : '#f5f5f5', padding:'3px 7px', borderRadius:10}}>{it.status}</span>
+        <span style={{fontSize:12, color: it.status==='approved' ? '#2e7d32' : '#777', background: it.status==='approved' ? '#e8f5e9' : '#f5f5f5', padding:'3px 7px', borderRadius:10}}>{contentStatusLabel(it.status)}</span>
       </div>
       <strong style={{fontSize:14, lineHeight:1.4}}>{it.title}</strong>
       <span style={{fontSize:13, color:'#555', display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical', overflow:'hidden', whiteSpace:'pre-line'}}>{it.body}</span>
       <span style={{fontSize:12, color:'#888'}}>Prompt: {it.prompt} • {formatDate(it.createdAt)} • {it.mediaIds?.length || 0} media</span>
       <div style={{display:'flex', gap:8, marginTop:4, flexWrap:'wrap'}}>
-        <button className="outline" onClick={()=>approve(it.id)} disabled={it.status==='Approved' || busy} style={{height:30, fontSize:13}}><CircleCheck size={12}/> Duyệt</button>
-        <button className="primary" onClick={()=>setScheduleFor(it.id)} disabled={it.status!=='Approved' || busy} title={it.status!=='Approved' ? 'Hãy duyệt trước' : ''} style={{height:30, fontSize:13}}><CalendarDays size={12}/> Lên lịch</button>
+        <button className="outline" onClick={()=>approve(it.id)} disabled={it.status==='approved' || busy} style={{height:30, fontSize:13}}><CircleCheck size={12}/> Duyệt</button>
+        <button className="primary" onClick={()=>setScheduleFor(it.id)} disabled={it.status!=='approved' || busy} title={it.status!=='approved' ? 'Hãy duyệt trước' : ''} style={{height:30, fontSize:13}}><CalendarDays size={12}/> Lên lịch</button>
         <button className="outline" onClick={()=>remove(it.id)} disabled={busy} style={{height:30, fontSize:13}}><Trash2 size={12}/> Xóa</button>
         <button className="outline" onClick={()=>setEditing({...it})} disabled={busy} style={{height:30, fontSize:13}}><Pencil size={12}/> Sửa</button>
       </div>
     </article>)}</div> : <div className="media-empty"><div><FileText size={34}/></div><h2>{items.length===0 ? 'Kho nội dung đang trống' : 'Không có kết quả'}</h2><p>{items.length===0 ? 'Hãy tạo nội dung ở AI Content và Lưu vào kho.' : 'Thử đổi bộ lọc hoặc từ khóa.'}</p></div>}
     {scheduleFor && <ScheduleModal contentId={scheduleFor} onClose={()=>setScheduleFor(null)} onCreated={refresh} />}
-    {editing && <div className="modal-overlay" onClick={()=>setEditing(null)} style={{position:'fixed', inset:0, background:'#0008', display:'grid', placeItems:'center', zIndex:50}}>
+    {editing && <div className="modal-overlay" onMouseDown={e=>{ if (e.target === e.currentTarget) setEditing(null) }} style={{position:'fixed', inset:0, background:'#0008', display:'grid', placeItems:'center', zIndex:50}}>
       <div className="modal" onClick={e=>e.stopPropagation()} style={{maxWidth:600, width:'90%', background:'#fff', borderRadius:12, padding:20, boxShadow:'0 8px 30px rgba(0,0,0,.2)'}}>
         <h2 style={{margin:0, fontSize:17}}>Sửa nội dung</h2>
         <div style={{display:'flex', flexDirection:'column', gap:10, marginTop:14}}>
@@ -722,9 +725,11 @@ function ContentWarehousePage() {
               setBusy(true); setErr('')
               try {
                 await invokeDesktop('update_content', {
-                  contentId: editing.id, title: editing.title, body: editing.body,
-                  prompt: editing.prompt, style: editing.style, customStyle: editing.customStyle || null,
-                  mediaIds: editing.mediaIds || []
+                  payload: {
+                    contentId: editing.id, title: editing.title, body: editing.body,
+                    prompt: editing.prompt, style: editing.style, customStyle: editing.customStyle || null,
+                    mediaIds: editing.mediaIds || []
+                  }
                 })
                 setEditing(null); await refresh()
               } catch (e) { setErr(String(e)) } finally { setBusy(false) }
@@ -950,7 +955,7 @@ function App() {
         // Recent posts: 3 mới nhất từ content (fallback khi chưa có insights)
         let recent = [...contents].sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt)).slice(0,3).map((c,i) => ({
           title: c.title, page: c.style, date: new Date(c.createdAt).toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}),
-          type: c.mediaIds && c.mediaIds.length ? 'Ảnh + văn bản' : 'Văn bản', status: c.status, color: ['#f0a86e','#7469d5','#4b9b7d'][i%3], initials: c.style.slice(0,2).toUpperCase(), reach: '—', likes: '—', comments: '—', pending: c.status !== 'Approved', tooltip: '', tooltipData: { impressions:'—', unique:'—', engaged:'—', clicks:'—', reactions:'—', videoViews:'—' }
+          type: c.mediaIds && c.mediaIds.length ? 'Ảnh + văn bản' : 'Văn bản', status: contentStatusLabel(c.status), color: ['#f0a86e','#7469d5','#4b9b7d'][i%3], initials: c.style.slice(0,2).toUpperCase(), reach: '—', likes: '—', comments: '—', pending: c.status !== 'approved', tooltip: '', tooltipData: { impressions:'—', unique:'—', engaged:'—', clicks:'—', reactions:'—', videoViews:'—' }
         }))
         setDashboardRecent(recent)
         setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights'); setDashboardEngagementRate('—')
