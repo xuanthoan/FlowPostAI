@@ -3,10 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, Runtime};
 
-// The full endpoint URL. We do NOT append any suffix to this — different servers
-// use different paths (e.g. /v1/chat/completions, /v1/responses, /v1).
-// Set this to the exact URL your server expects POST requests on.
-pub const DEFAULT_BASE_URL: &str = "http://127.0.0.1:20128/v1/chat/completions";
+pub const DEFAULT_BASE_URL: &str = "http://127.0.0.1:20128/v1";
 pub const DEFAULT_MODEL: &str = "xoay-vong-worker-web-128k";
 pub const DEFAULT_PROVIDER_ID: &str = "custom-provider";
 pub const DEFAULT_DISPLAY_NAME: &str = "Custom provider";
@@ -429,10 +426,11 @@ pub async fn fetch_provider_models(app: AppHandle, id: String) -> Result<Vec<Str
     if key.trim().is_empty() {
         return Err("API key trống".into());
     }
-    let base = provider.base_url.trim_end_matches('/').to_string();
-    let url = format!("{}/models", base);
+    let base = provider.base_url.trim_end_matches('/').replace("localhost", "127.0.0.1").to_string();
+    let url = base.clone();
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
+        .http1_only()
         .build()
         .map_err(|e| format!("Không thể khởi tạo HTTP client: {}", e))?;
     let resp = client

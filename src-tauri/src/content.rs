@@ -35,6 +35,19 @@ pub struct ContentItem {
     pub updated_at: DateTime<Utc>,
 }
 
+pub const TITLE_BODY_SEPARATOR: &str = "\n\n\n";
+
+pub fn compose_facebook_post(title: &str, body: &str) -> String {
+    let t = title.trim();
+    let b = body.trim();
+    match (t.is_empty(), b.is_empty()) {
+        (false, false) => format!("{}{}{}", t, TITLE_BODY_SEPARATOR, b),
+        (false, true) => t.to_string(),
+        (true, false) => b.to_string(),
+        (true, true) => String::new(),
+    }
+}
+
 fn content_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -355,5 +368,20 @@ mod tests {
         assert!(pos.is_none(), "Non-existent id should not be found");
 
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_compose_facebook_post_full() {
+        assert_eq!(
+            compose_facebook_post("TIN HOT", "Thân bài"),
+            "TIN HOT\n\n\nThân bài"
+        );
+    }
+
+    #[test]
+    fn test_compose_facebook_post_empty_parts() {
+        assert_eq!(compose_facebook_post("TIN", ""), "TIN");
+        assert_eq!(compose_facebook_post("", "Thân"), "Thân");
+        assert_eq!(compose_facebook_post("", ""), "");
     }
 }

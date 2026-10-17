@@ -82,7 +82,7 @@ function ProvidersPanel() {
   const desktop = isDesktop()
   const [providers, setProviders] = useState([])
   const [activeId, setActiveId] = useState('')
-  const [form, setForm] = useState({ id: 'custom-provider', displayName: 'Custom provider', baseUrl: 'http://127.0.0.1:20128/v1/chat/completions', apiKey: '', models: [] })
+  const [form, setForm] = useState({ id: 'custom-provider', displayName: 'Custom provider', baseUrl: 'http://127.0.0.1:20128/v1', apiKey: '', models: [] })
   const [hasApiKey, setHasApiKey] = useState(false)
   const [modelInput, setModelInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -122,7 +122,7 @@ function ProvidersPanel() {
   }
 
   const handleAddNew = () => {
-    setForm({ id: '', displayName: '', baseUrl: 'http://127.0.0.1:20128/v1/chat/completions', apiKey: '', models: [] })
+    setForm({ id: '', displayName: '', baseUrl: 'http://127.0.0.1:20128/v1', apiKey: '', models: [] })
     setHasApiKey(false)
     setIsEditing(false)
     setErr(''); setMsg('')
@@ -697,7 +697,7 @@ function ContentWarehousePage() {
         <span style={{fontSize:12, color: it.status==='Approved' ? '#2e7d32' : '#777', background: it.status==='Approved' ? '#e8f5e9' : '#f5f5f5', padding:'3px 7px', borderRadius:10}}>{it.status}</span>
       </div>
       <strong style={{fontSize:14, lineHeight:1.4}}>{it.title}</strong>
-      <span style={{fontSize:13, color:'#555', display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical', overflow:'hidden'}}>{it.body}</span>
+      <span style={{fontSize:13, color:'#555', display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical', overflow:'hidden', whiteSpace:'pre-line'}}>{it.body}</span>
       <span style={{fontSize:12, color:'#888'}}>Prompt: {it.prompt} • {formatDate(it.createdAt)} • {it.mediaIds?.length || 0} media</span>
       <div style={{display:'flex', gap:8, marginTop:4, flexWrap:'wrap'}}>
         <button className="outline" onClick={()=>approve(it.id)} disabled={it.status==='Approved' || busy} style={{height:30, fontSize:13}}><CircleCheck size={12}/> Duyệt</button>

@@ -3,7 +3,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Runtime};
 use std::time::Duration;
 
-const AI_TIMEOUT_SECS: u64 = 60;
+const AI_TIMEOUT_SECS: u64 = 120;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,7 +32,10 @@ fn build_system_message(style: &str, custom_style: Option<&str>) -> String {
     } else {
         style
     };
-    format!("Bạn là chuyên gia viết nội dung Facebook với style: {}", style_label)
+    format!(
+        "Bạn là chuyên gia viết nội dung Facebook với style: {}\n\nQUY TẮC ĐỊNH DẠNG BẮT BUỘC (tuân thủ tuyệt đối):\n1. Chỉ viết văn bản thuần (plain text). KHÔNG dùng markdown.\n2. KHÔNG dùng các ký tự: #, ##, ###, **, *, _, `, >, hoặc gạch đầu dòng markdown.\n3. Dòng đầu tiên là TIÊU ĐỀ, viết IN HOA toàn bộ.\n4. Sau tiêu đề, để trống 2 dòng rồi mới viết phần thân bài.\n5. Không viết tiêu đề và thân bài trên cùng một dòng.",
+        style_label
+    )
 }
 
 #[derive(Serialize)]
@@ -114,20 +117,56 @@ struct AnthropicContent {
     text: String,
 }
 
+fn strip_markdown(input: &str) -> String {
+    let global = input.replace("**", "").replace("__", "").replace('`', "");
+    let mut out: Vec<String> = Vec::new();
+    for raw in global.lines() {
+        let mut line = raw.trim_start();
+        // blockquote
+        while let Some(rest) = line.strip_prefix('>') {
+            line = rest.trim_start();
+        }
+        // leading heading hashes
+        line = line.trim_start_matches('#');
+        let mut trimmed = line.trim_start();
+        // bullet markers
+        if let Some(rest) = trimmed.strip_prefix("- ") {
+            trimmed = rest;
+        } else if let Some(rest) = trimmed.strip_prefix("+ ") {
+            trimmed = rest;
+        }
+        // numbered marker: digits then '.' or ')' then space
+        let digits: String = trimmed.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if !digits.is_empty() {
+            let after = &trimmed[digits.len()..];
+            if let Some(rest) = after.strip_prefix(". ").or_else(|| after.strip_prefix(") ")) {
+                trimmed = rest;
+            }
+        }
+        // remove remaining standalone * or _ emphasis chars
+        let cleaned = trimmed.replace('*', "").replace('_', "");
+        out.push(cleaned.trim().to_string());
+    }
+    out.join("\n")
+}
+
 fn parse_ai_response(content: &str) -> (String, String) {
     // Try to split by \n---\n delimiter for title/body
-    if let Some(idx) = content.find("\n---\n") {
-        let title = content[..idx].trim().to_string();
-        let body = content[idx + 5..].trim().to_string();
-        return (title, body);
-    }
-    // Fallback: first line is title, rest is body
-    let lines: Vec<&str> = content.lines().collect();
-    if lines.is_empty() {
-        return ("Nội dung".to_string(), content.to_string());
-    }
-    let title = lines[0].trim().to_string();
-    let body = lines[1..].join("\n").trim().to_string();
+    let (raw_title, raw_body) = if let Some(idx) = content.find("\n---\n") {
+        (content[..idx].to_string(), content[idx + 5..].to_string())
+    } else {
+        // Fallback: first line is title, rest is body
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.is_empty() {
+            return ("NỘI DUNG".to_string(), String::new());
+        }
+        (lines[0].to_string(), lines[1..].join("\n"))
+    };
+    let title = {
+        let t = strip_markdown(&raw_title).trim().to_uppercase();
+        if t.is_empty() { "NỘI DUNG".to_string() } else { t }
+    };
+    let body = strip_markdown(&raw_body).trim().to_string();
     (title, body)
 }
 
@@ -138,9 +177,6 @@ fn max_tokens_for_length(length: Option<&str>) -> u32 {
         _ => 500,
     }
 }
-
-// NOTE: base_url IS the full endpoint URL (e.g. "http://127.0.0.1:20128/v1/chat/completions").
-// We do NOT append any suffix — different servers use different paths.
 
 async fn call_ai_provider(
     app: &AppHandle<impl Runtime>,
@@ -157,8 +193,10 @@ async fn call_ai_provider(
         .first()
         .cloned()
         .unwrap_or_else(|| crate::providers::DEFAULT_MODEL.to_string());
-    let base_url = provider.base_url.trim_end_matches('/').replace("localhost", "127.0.0.1").to_string();
-
+    let raw_base = provider.base_url.trim_end_matches('/').replace("localhost", "127.0.0.1").to_string();
+    let base_url = raw_base.trim_end_matches("/chat/completions").trim_end_matches("/responses").trim_end_matches("/messages").trim_end_matches('/').to_string();
+    let url = format!("{}/chat/completions", base_url);
+    // Appends /chat/completions but handles case where base already contains suffix to avoid double
     // Protocol is hardcoded to openai-completions — the server handles all formats at the same endpoint
     let req = ChatCompletionRequest {
         model: &model,
@@ -170,7 +208,6 @@ async fn call_ai_provider(
         temperature: 0.7,
     };
     let body = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-    let url = base_url.clone();
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(AI_TIMEOUT_SECS))
@@ -196,12 +233,39 @@ async fn call_ai_provider(
     let response_body = resp.text().await.map_err(|e| e.to_string())?;
 
     if status >= 200 && status < 300 {
-        let parsed: ChatCompletionResponse = serde_json::from_str(&response_body)
-            .map_err(|e| format!("Không parse được phản hồi AI: {}", e))?;
-        if let Some(choice) = parsed.choices.first() {
-            Ok(choice.message.content.clone())
+        if response_body.trim_start().starts_with("data:") || response_body.contains("\ndata:") {
+            // SSE streaming: collect delta.content
+            let mut combined = String::new();
+            for line in response_body.lines() {
+                let trimmed = line.trim();
+                if !trimmed.starts_with("data:") { continue; }
+                let json_str = trimmed.trim_start_matches("data:").trim();
+                if json_str == "[DONE]" || json_str.is_empty() { continue; }
+                if let Ok(val) = serde_json::from_str::<Value>(json_str) {
+                    if let Some(choices) = val.get("choices").and_then(|c| c.as_array()) {
+                        for choice in choices {
+                            if let Some(content) = choice.get("delta").and_then(|d| d.get("content")).and_then(|c| c.as_str()) {
+                                combined.push_str(content);
+                            } else if let Some(content) = choice.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+                                combined.push_str(content);
+                            }
+                        }
+                    } else if let Some(content) = val.get("choices").and_then(|c| c.as_array()).and_then(|arr| arr.first()).and_then(|ch| ch.get("delta")).and_then(|d| d.get("content")).and_then(|c| c.as_str()) { combined.push_str(content); }
+                }
+            }
+            if !combined.trim().is_empty() {
+                Ok(combined)
+            } else {
+                Err(format!("Phản hồi AI rỗng (SSE): {}", &response_body.chars().take(300).collect::<String>()))
+            }
         } else {
-            Err("Phản hồi AI không có choices".into())
+            // Try non-streaming JSON
+            let parsed: ChatCompletionResponse = serde_json::from_str(&response_body).map_err(|e| format!("Không parse được phản hồi AI: {} body={}", e, &response_body.chars().take(500).collect::<String>()))?;
+            if let Some(choice) = parsed.choices.first() {
+                Ok(choice.message.content.clone())
+            } else {
+                Err("Phản hồi AI không có choices".into())
+            }
         }
     } else {
         let error_msg = match status {
@@ -273,7 +337,7 @@ mod tests {
     async fn test_parse_ai_response_with_delimiter() {
         let content = "Title here\n---\nBody here";
         let (title, body) = parse_ai_response(content);
-        assert_eq!(title, "Title here");
+        assert_eq!(title, "TITLE HERE");
         assert_eq!(body, "Body here");
     }
 
@@ -281,7 +345,7 @@ mod tests {
     async fn test_parse_ai_response_fallback() {
         let content = "First line is title\nSecond line is body";
         let (title, body) = parse_ai_response(content);
-        assert_eq!(title, "First line is title");
+        assert_eq!(title, "FIRST LINE IS TITLE");
         assert_eq!(body, "Second line is body");
     }
 
@@ -289,8 +353,57 @@ mod tests {
     async fn test_parse_ai_response_empty() {
         let content = "";
         let (title, body) = parse_ai_response(content);
-        assert_eq!(title, "Nội dung");
+        assert_eq!(title, "NỘI DUNG");
         assert_eq!(body, "");
+    }
+
+    #[tokio::test]
+    async fn test_parse_ai_response_bullets_and_numbered() {
+        let (title, body) = parse_ai_response("- Mục 1\n* Mục 2\n1. Mục 3");
+        assert_eq!(title, "MỤC 1");
+        assert_eq!(body, "Mục 2\nMục 3");
+    }
+
+    #[test]
+    fn test_strip_markdown_removes_emphasis() {
+        assert_eq!(strip_markdown("**a** và `b` và _c_"), "a và b và c");
+    }
+
+    #[test]
+    fn test_strip_markdown_removes_leading_heading_and_bullets() {
+        assert_eq!(
+            strip_markdown("### T\n- a\n* b\n+ c\n1. d\n> e"),
+            "T\na\nb\nc\nd\ne"
+        );
+    }
+
+    #[test]
+    fn test_parse_ai_response_strips_markdown() {
+        let (title, body) = parse_ai_response("### Tiêu đề\n---\n**Đậm** và `code`");
+        assert_eq!(title, "TIÊU ĐỀ");
+        assert_eq!(body, "Đậm và code");
+    }
+
+    #[test]
+    fn test_parse_ai_response_uppercase_vietnamese() {
+        let (title, _body) = parse_ai_response("điều kỳ diệu\n---\nbody");
+        assert_eq!(title, "ĐIỀU KỲ DIỆU");
+    }
+
+    #[test]
+    fn test_parse_ai_response_uppercase_fallback() {
+        let (title, body) = parse_ai_response("First line is title\nSecond");
+        assert_eq!(title, "FIRST LINE IS TITLE");
+        assert_eq!(body, "Second");
+    }
+
+    #[test]
+    fn test_build_system_message_contains_format_rules() {
+        let msg = build_system_message("Viral", None);
+        assert!(msg.contains("chuyên gia viết nội dung Facebook"));
+        assert!(msg.contains("KHÔNG dùng markdown"));
+        assert!(msg.contains("IN HOA"));
+        assert!(msg.contains("2 dòng"));
     }
 
     #[tokio::test]
@@ -422,7 +535,7 @@ mod tests {
         let text = &parsed.output[0].content[0].text;
         assert_eq!(text, content);
         let (title, body) = parse_ai_response(text);
-        assert_eq!(title, "Tiêu đề");
+        assert_eq!(title, "TIÊU ĐỀ");
         assert_eq!(body, "Body responses");
     }
 
@@ -436,7 +549,7 @@ mod tests {
         assert_eq!(parsed.content[0].ctype, "text");
         let combined: String = parsed.content.iter().map(|c| c.text.clone()).collect::<Vec<_>>().join("\n");
         let (title, body) = parse_ai_response(&combined);
-        assert_eq!(title, "Dòng 1");
+        assert_eq!(title, "DÒNG 1");
         assert!(body.contains("Dòng 2"));
     }
 }
