@@ -139,6 +139,131 @@ fn normalize_models(models: Option<Vec<String>>) -> Vec<String> {
     out
 }
 
+const KNOWN_ENDPOINT_SUFFIXES: [&str; 4] =
+    ["/chat/completions", "/responses", "/messages", "/models"];
+
+/// Chuan hoa base URL nguoi dung nhap ve "root" dung chung cho ca chat va models.
+/// - trim khoang trang; thay "localhost" -> "127.0.0.1" (giu hanh vi cu)
+/// - bo moi '/' o cuoi
+/// - lap bo cac suffix endpoint da biet de tranh double suffix
+pub(crate) fn normalize_base_root(base: &str) -> String {
+    let mut s = base.trim().replace("localhost", "127.0.0.1");
+    s = s.trim_end_matches('/').to_string();
+    loop {
+        let mut changed = false;
+        for suf in KNOWN_ENDPOINT_SUFFIXES {
+            if let Some(rest) = s.strip_suffix(suf) {
+                s = rest.trim_end_matches('/').to_string();
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    s
+}
+
+pub(crate) fn models_url(base: &str) -> String {
+    format!("{}/models", normalize_base_root(base))
+}
+
+pub(crate) fn chat_completions_url(base: &str) -> String {
+    format!("{}/chat/completions", normalize_base_root(base))
+}
+
+fn push_model(out: &mut Vec<String>, raw: &str) {
+    let m = raw.trim();
+    if m.is_empty() {
+        return;
+    }
+    if !out.iter().any(|x| x == m) {
+        out.push(m.to_string());
+    }
+}
+
+/// Parse nhieu format: OpenAI {"data":[{"id":..}]}, Google {"models":[{"name":"models/x"}]},
+/// hoac top-level array (string hoac object co "id"). Trim, dedupe, sort.
+pub(crate) fn parse_models_response(body: &str) -> Result<Vec<String>, String> {
+    let mut models: Vec<String> = Vec::new();
+    if let Ok(json) = serde_json::from_str::<serde_json::Value>(body) {
+        if let Some(data) = json.get("data").and_then(|d| d.as_array()) {
+            for v in data {
+                if let Some(id) = v.get("id").and_then(|x| x.as_str()) {
+                    push_model(&mut models, id);
+                }
+            }
+        }
+        if models.is_empty() {
+            if let Some(list) = json.get("models").and_then(|d| d.as_array()) {
+                for v in list {
+                    if let Some(name) = v.get("name").and_then(|x| x.as_str()) {
+                        let clean = name.strip_prefix("models/").unwrap_or(name);
+                        push_model(&mut models, clean);
+                    } else if let Some(id) = v.get("id").and_then(|x| x.as_str()) {
+                        push_model(&mut models, id);
+                    }
+                }
+            }
+        }
+        if models.is_empty() {
+            if let Some(arr) = json.as_array() {
+                for v in arr {
+                    if let Some(s) = v.as_str() {
+                        push_model(&mut models, s);
+                    } else if let Some(id) = v.get("id").and_then(|x| x.as_str()) {
+                        push_model(&mut models, id);
+                    }
+                }
+            }
+        }
+    }
+    if models.is_empty() {
+        return Err(format!(
+            "Không parse được danh sách models: {}",
+            body.chars().take(300).collect::<String>()
+        ));
+    }
+    models.sort();
+    models.dedup();
+    Ok(models)
+}
+
+fn apply_update_fields(
+    provider: &mut Provider,
+    payload: &UpdateProviderPayload,
+) -> Result<(), String> {
+    if let Some(display_name) = &payload.display_name {
+        let trimmed = display_name.trim();
+        if !trimmed.is_empty() {
+            provider.display_name = trimmed.to_string();
+        }
+    }
+    if let Some(base_url) = &payload.base_url {
+        validate_base_url(base_url)?;
+        provider.base_url = base_url.trim().to_string();
+    }
+    if let Some(protocol) = &payload.protocol {
+        validate_protocol(protocol)?;
+        provider.protocol = protocol.trim().to_string();
+    }
+    if let Some(models) = &payload.models {
+        // Ghi ke ca khi rong: cho phep xoa/thay the danh sach models mot cach tuong minh.
+        provider.models = normalize_models(Some(models.clone()));
+    }
+    Ok(())
+}
+
+fn models_for_create(base_url: &str, models: Vec<String>) -> Vec<String> {
+    if models.is_empty()
+        && normalize_base_root(base_url) == normalize_base_root(DEFAULT_BASE_URL)
+    {
+        vec![DEFAULT_MODEL.to_string()]
+    } else {
+        models
+    }
+}
+
 fn to_public(provider: &Provider, has_api_key: bool) -> ProviderPublic {
     ProviderPublic {
         id: provider.id.clone(),
@@ -304,6 +429,21 @@ pub fn get_active_provider(app: AppHandle) -> Result<ProviderPublic, String> {
 }
 
 #[tauri::command]
+pub fn set_active_provider(app: AppHandle, id: String) -> Result<ProviderPublic, String> {
+    let id = id.trim().to_lowercase();
+    let mut file = read_providers_file(&app)?;
+    let provider = file
+        .providers
+        .iter()
+        .find(|p| p.id == id)
+        .cloned()
+        .ok_or(format!("Không tìm thấy provider '{}'", id))?;
+    file.active_provider_id = provider.id.clone();
+    write_providers_file(&app, &file)?;
+    Ok(to_public(&provider, has_api_key_for(&app, &id)))
+}
+
+#[tauri::command]
 pub fn create_provider(app: AppHandle, payload: CreateProviderPayload) -> Result<ProviderPublic, String> {
     let id = payload.id.trim().to_lowercase();
     if !is_valid_id(&id) {
@@ -326,11 +466,7 @@ pub fn create_provider(app: AppHandle, payload: CreateProviderPayload) -> Result
         display_name,
         base_url: payload.base_url.trim().to_string(),
         protocol: payload.protocol.trim().to_string(),
-        models: if models.is_empty() {
-            vec![DEFAULT_MODEL.to_string()]
-        } else {
-            models
-        },
+        models: models_for_create(&payload.base_url, models),
     };
     if let Some(key) = payload.api_key {
         if !key.trim().is_empty() {
@@ -357,26 +493,9 @@ pub fn update_provider(
         .position(|p| p.id == id)
         .ok_or(format!("Không tìm thấy provider '{}'", id))?;
 
-    if let Some(display_name) = payload.display_name {
-        let trimmed = display_name.trim().to_string();
-        if !trimmed.is_empty() {
-            file.providers[idx].display_name = trimmed;
-        }
-    }
-    if let Some(base_url) = payload.base_url {
-        validate_base_url(&base_url)?;
-        file.providers[idx].base_url = base_url.trim().to_string();
-    }
-    if let Some(protocol) = payload.protocol {
-        validate_protocol(&protocol)?;
-        file.providers[idx].protocol = protocol.trim().to_string();
-    }
-    if let Some(models) = payload.models {
-        let normalized = normalize_models(Some(models));
-        if !normalized.is_empty() {
-            file.providers[idx].models = normalized;
-        }
-    }
+    let mut provider = file.providers[idx].clone();
+    apply_update_fields(&mut provider, &payload)?;
+    file.providers[idx] = provider;
     if let Some(api_key) = payload.api_key {
         if api_key.trim().is_empty() {
             crate::security::delete_secret_hybrid(Some(&app), &api_key_name(&id))?;
@@ -426,54 +545,53 @@ pub async fn fetch_provider_models(app: AppHandle, id: String) -> Result<Vec<Str
     if key.trim().is_empty() {
         return Err("API key trống".into());
     }
-    let base = provider.base_url.trim_end_matches('/').replace("localhost", "127.0.0.1").to_string();
-    let url = base.clone();
+    let root = normalize_base_root(&provider.base_url);
+    let mut candidates: Vec<String> = vec![models_url(&provider.base_url)];
+    if !root.is_empty() {
+        candidates.push(root.clone());
+    }
+
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .http1_only()
         .build()
         .map_err(|e| format!("Không thể khởi tạo HTTP client: {}", e))?;
-    let resp = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", key))
-        .send()
-        .await
-        .map_err(|e| format!("Không thể kết nối provider để fetch models: {}", e))?;
-    let status = resp.status().as_u16();
-    let body = resp.text().await.map_err(|e| e.to_string())?;
-    if !(200..300).contains(&status) {
-        return Err(format!("Lỗi fetch models ({}): {}", status, &body.chars().take(300).collect::<String>()));
-    }
-    // Try OpenAI format {"data":[{"id":"model-x"},...]} or {"object":"list","data":[...]}
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
-        if let Some(data) = json.get("data").and_then(|d| d.as_array()) {
-            let mut models: Vec<String> = data
-                .iter()
-                .filter_map(|v| {
-                    v.get("id")
-                        .and_then(|id| id.as_str())
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                })
-                .collect();
-            if !models.is_empty() {
-                models.sort();
-                models.dedup();
-                return Ok(models);
+
+    let mut last_err: Option<String> = None;
+    for url in candidates {
+        let resp = match client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", key))
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                last_err = Some(format!(
+                    "Không thể kết nối provider để fetch models: {}",
+                    e
+                ));
+                continue;
             }
+        };
+        let status = resp.status().as_u16();
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        if !(200..300).contains(&status) {
+            last_err = Some(format!(
+                "Lỗi fetch models ({}): {}",
+                status,
+                body.chars().take(300).collect::<String>()
+            ));
+            continue;
         }
-        // fallback: if body is array directly
-        if let Some(arr) = json.as_array() {
-            let models: Vec<String> = arr
-                .iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect();
-            if !models.is_empty() {
-                return Ok(models);
+        match parse_models_response(&body) {
+            Ok(models) => return Ok(models),
+            Err(e) => {
+                last_err = Some(e);
             }
         }
     }
-    Err(format!("Không parse được danh sách models: {}", &body.chars().take(300).collect::<String>()))
+    Err(last_err.unwrap_or_else(|| "Không fetch được danh sách models".to_string()))
 }
 
 #[cfg(test)]
@@ -645,5 +763,185 @@ mod tests {
         let err = resolve_active_provider_at(&dir, &key_map).unwrap_err();
         assert!(err.contains("API key"));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn sample_provider(models: Vec<String>) -> Provider {
+        Provider {
+            id: "acme-gateway".into(),
+            display_name: "Acme".into(),
+            base_url: "https://example.com/v1".into(),
+            protocol: "openai-completions".into(),
+            models,
+        }
+    }
+
+    fn blank_update_payload() -> UpdateProviderPayload {
+        UpdateProviderPayload {
+            display_name: None,
+            base_url: None,
+            protocol: None,
+            models: None,
+            api_key: None,
+        }
+    }
+
+    #[test]
+    fn test_normalize_base_root_variants() {
+        assert_eq!(
+            normalize_base_root("http://127.0.0.1:20128/v1/"),
+            "http://127.0.0.1:20128/v1"
+        );
+        assert_eq!(
+            normalize_base_root("http://127.0.0.1:20128/v1/chat/completions"),
+            "http://127.0.0.1:20128/v1"
+        );
+        assert_eq!(
+            normalize_base_root("http://127.0.0.1:20128/v1/models"),
+            "http://127.0.0.1:20128/v1"
+        );
+        assert_eq!(
+            normalize_base_root("http://localhost:20128/v1"),
+            "http://127.0.0.1:20128/v1"
+        );
+        assert_eq!(
+            normalize_base_root("http://127.0.0.1:20128/v1/chat/completions/"),
+            "http://127.0.0.1:20128/v1"
+        );
+    }
+
+    #[test]
+    fn test_models_url_exact() {
+        assert_eq!(
+            models_url("https://api.deepseek.com"),
+            "https://api.deepseek.com/models"
+        );
+        assert_eq!(
+            models_url("https://api.deepseek.com/v1"),
+            "https://api.deepseek.com/v1/models"
+        );
+        assert_eq!(
+            models_url("https://generativelanguage.googleapis.com/v1beta/openai"),
+            "https://generativelanguage.googleapis.com/v1beta/openai/models"
+        );
+        assert_eq!(
+            models_url("http://127.0.0.1:20128/v1/chat/completions"),
+            "http://127.0.0.1:20128/v1/models"
+        );
+    }
+
+    #[test]
+    fn test_chat_completions_url_exact() {
+        assert_eq!(
+            chat_completions_url("https://api.deepseek.com"),
+            "https://api.deepseek.com/chat/completions"
+        );
+        assert_eq!(
+            chat_completions_url("https://api.deepseek.com/v1"),
+            "https://api.deepseek.com/v1/chat/completions"
+        );
+        assert_eq!(
+            chat_completions_url("https://generativelanguage.googleapis.com/v1beta/openai"),
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        );
+        // idempotent
+        assert_eq!(
+            chat_completions_url("http://127.0.0.1:20128/v1/chat/completions"),
+            "http://127.0.0.1:20128/v1/chat/completions"
+        );
+        assert_eq!(
+            chat_completions_url("https://api.anthropic.com/v1"),
+            "https://api.anthropic.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn test_parse_models_openai_shape() {
+        let body = r#"{"object":"list","data":[{"id":"b"},{"id":"a"},{"id":"a"}]}"#;
+        assert_eq!(
+            parse_models_response(body).unwrap(),
+            vec!["a".to_string(), "b".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_parse_models_google_shape() {
+        let body = r#"{"models":[{"name":"models/gemini-2.5-flash"},{"name":"models/gemini-2.5-pro"}]}"#;
+        assert_eq!(
+            parse_models_response(body).unwrap(),
+            vec!["gemini-2.5-flash".to_string(), "gemini-2.5-pro".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_parse_models_top_level_array() {
+        let body = r#"["b","a"]"#;
+        assert_eq!(
+            parse_models_response(body).unwrap(),
+            vec!["a".to_string(), "b".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_parse_models_invalid_body_errors() {
+        let err = parse_models_response("not json").unwrap_err();
+        assert!(err.contains("Không parse được danh sách models"));
+    }
+
+    #[test]
+    fn test_apply_update_fields_clears_models() {
+        let mut provider = sample_provider(vec!["m".to_string()]);
+        let mut payload = blank_update_payload();
+        payload.models = Some(vec![]);
+        apply_update_fields(&mut provider, &payload).unwrap();
+        assert!(provider.models.is_empty());
+    }
+
+    #[test]
+    fn test_apply_update_fields_normalizes_models() {
+        let mut provider = sample_provider(vec![]);
+        let mut payload = blank_update_payload();
+        payload.models = Some(vec![" x ".into(), "".into(), "x".into()]);
+        apply_update_fields(&mut provider, &payload).unwrap();
+        assert_eq!(provider.models, vec!["x".to_string()]);
+
+        let before = provider.models.clone();
+        let payload_none = blank_update_payload();
+        apply_update_fields(&mut provider, &payload_none).unwrap();
+        assert_eq!(provider.models, before);
+    }
+
+    #[test]
+    fn test_apply_update_fields_rejects_invalid() {
+        let mut provider = sample_provider(vec![]);
+
+        let mut bad_protocol = blank_update_payload();
+        bad_protocol.protocol = Some("bad".into());
+        let err = apply_update_fields(&mut provider, &bad_protocol).unwrap_err();
+        assert!(err.contains("Protocol không hợp lệ"));
+
+        let mut bad_base = blank_update_payload();
+        bad_base.base_url = Some("ftp://x".into());
+        assert!(apply_update_fields(&mut provider, &bad_base).is_err());
+    }
+
+    #[test]
+    fn test_models_for_create_default_local() {
+        assert_eq!(
+            models_for_create(DEFAULT_BASE_URL, vec![]),
+            vec![DEFAULT_MODEL.to_string()]
+        );
+        assert_eq!(
+            models_for_create("http://localhost:20128/v1/", vec![]),
+            vec![DEFAULT_MODEL.to_string()]
+        );
+    }
+
+    #[test]
+    fn test_models_for_create_remote_keeps_empty() {
+        assert_eq!(models_for_create("https://api.openai.com/v1", vec![]), Vec::<String>::new());
+        assert_eq!(
+            models_for_create(DEFAULT_BASE_URL, vec!["m".to_string()]),
+            vec!["m".to_string()]
+        );
     }
 }

@@ -2,6 +2,29 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-18 — Onboarding provider AI theo chuẩn OpenAI Compatibility (preset + fix fetch/save models)
+### Added
+- `src/providerPresets.js` — catalog 5 preset: ChatGPT (OpenAI), Google Gemini, Anthropic Claude, DeepSeek, Custom/OpenAI-compatible (dùng cho "muse" khi có base URL) + helper `isDefaultLocalBase`
+- `src/App.jsx` `ProvidersPanel` — dropdown "Mẫu provider nhanh" điền sẵn base URL + model gợi ý (không ghi đè id/display name đang có); badge `● active` phản ánh provider đang dùng; nút `Đặt active` trên mỗi dòng chưa active; nút lưu đổi thành `Tạo provider`/`Cập nhật provider` (bỏ toggle Edit/Create mập mờ)
+- `src-tauri/src/providers.rs` — command `set_active_provider` (chọn provider đang dùng) + đăng ký trong `lib.rs`
+### Fixed
+- `src-tauri/src/providers.rs` — `fetch_provider_models` trước đây GET thẳng base URL (không thêm `/models`) nên Gemini/OpenAI/DeepSeek trả 404; nay dựng URL qua `models_url()` (chuẩn hoá base, bỏ các suffix endpoint đã biết) và FALLBACK về base URL gốc khi `/models` không dùng được (giữ tương thích gateway local hiện tại)
+- `src-tauri/src/providers.rs` — `parse_models_response` hỗ trợ thêm format Google `{"models":[{"name":"models/..."}]}` (tự strip tiền tố `models/`), format OpenAI `{"data":[{"id":...}]}` và mảng top-level
+- `src-tauri/src/providers.rs` — `update_provider` trước đây BỎ QUA khi danh sách models rỗng nên không thể sửa/xoá model; nay ghi kể cả mảng rỗng (qua `apply_update_fields`)
+- `src-tauri/src/providers.rs` — `create_provider` trước đây luôn ép `xoay-vong-worker-web-128k` cho mọi provider; nay chỉ ép khi base URL là gateway local mặc định
+- `src/App.jsx` — "Fetch available models" trước đây TRỘN model mới vào danh sách cũ (tích tụ model sai); nay THAY THẾ (có xác nhận khi danh sách hiện tại khác rỗng)
+- `src/App.jsx` — `load()` trước đây không set `activeId` nên badge `● active` không bao giờ hiện
+### Changed
+- `src-tauri/src/ai.rs` — dùng chung `providers::chat_completions_url()` thay vì tự cắt suffix inline (một nguồn chuẩn hoá URL cho cả generate và fetch models)
+- `e2e/providers.spec.ts` — mock có state `activeId` + case `set_active_provider` + 1 test mới; `e2e/schedule.spec.ts` thêm case phòng vệ
+### Verified
+- `cargo test --lib` 103 passed / 0 failed (91 cũ + 12 mới); `cargo check`/`cargo build` OK (7 warning dead-code có sẵn, không phát sinh cảnh báo mới); `npm run build` OK (2395 modules); `npm run lint` exit 0 (do implementer chạy; QA bị chặn bởi sandbox allowlist nên không chạy lại độc lập được); Playwright `--list` parse OK (8 test providers). Chạy e2e runtime cần cửa sổ Tauri (`npm run tauri:dev`) → chưa xác minh.
+### Notes
+- Provider luôn dùng `protocol = openai-completions` (Gemini/Claude/DeepSeek/OpenAI đều hỗ trợ chuẩn này); chưa expose UI chọn protocol.
+- "muse" chưa có base URL chính thức → dùng preset Custom/OpenAI-compatible.
+- Model gợi ý trong preset chỉ mang tính tham khảo; nút "Fetch available models" là nguồn chân lý.
+- Base URL nhập ở dạng nào cũng được (`https://api.deepseek.com` hay `.../v1`, có/không `/chat/completions`) vì cả generate và fetch models dùng chung một hàm chuẩn hoá.
+
 ## [Unreleased] - 2026-10-17 — Fix triệt để mojibake output AI (encoding)
 ### Fixed
 - `src-tauri/src/ai.rs` — thay `String::from_utf8_lossy` (tạo U+FFFD, phá byte) bằng `decode_response_bytes` không mất dữ liệu: UTF-8 nghiêm ngặt, fallback giải mã CP1252 (byte→char)

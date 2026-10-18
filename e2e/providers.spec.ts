@@ -9,6 +9,7 @@ window.__TAURI_MOCK__ = true;
 window.__TAURI_INTERNALS__ = {};
 window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
   const baseUrl = ${JSON.stringify(BASE_URL)};
+  let activeId = 'custom-provider';
   switch (cmd) {
     case 'list_providers':
       return [
@@ -23,7 +24,7 @@ window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
       ];
     case 'get_active_provider':
       return {
-        id: 'custom-provider',
+        id: activeId,
         displayName: 'Custom provider',
         baseUrl: baseUrl,
         protocol: 'openai-completions',
@@ -54,6 +55,16 @@ window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
     }
     case 'fetch_provider_models':
       return ['xoay-vong-worker-web-128k'];
+    case 'set_active_provider':
+      activeId = args?.id ?? activeId;
+      return {
+        id: activeId,
+        displayName: 'Custom provider',
+        baseUrl: baseUrl,
+        protocol: 'openai-completions',
+        models: ['xoay-vong-worker-web-128k'],
+        hasApiKey: true,
+      };
     case 'delete_provider':
       return;
     default:
@@ -163,5 +174,13 @@ test.describe('Providers E2E (real server)', () => {
       id: 'custom-provider',
       payload: { protocol: 'openai-completions' },
     });
+  });
+
+  test('set_active_provider updates active provider', async ({ page }) => {
+    await ensureProvider(page);
+    const res: any = await invoke(page, 'set_active_provider', { id: 'custom-provider' });
+    expect(res.id).toBe('custom-provider');
+    const active: any = await invoke(page, 'get_active_provider');
+    expect(active.id).toBe('custom-provider');
   });
 });

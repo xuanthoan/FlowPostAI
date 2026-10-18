@@ -329,10 +329,8 @@ async fn call_ai_provider(
         .first()
         .cloned()
         .unwrap_or_else(|| crate::providers::DEFAULT_MODEL.to_string());
-    let raw_base = provider.base_url.trim_end_matches('/').replace("localhost", "127.0.0.1").to_string();
-    let base_url = raw_base.trim_end_matches("/chat/completions").trim_end_matches("/responses").trim_end_matches("/messages").trim_end_matches('/').to_string();
-    let url = format!("{}/chat/completions", base_url);
-    // Appends /chat/completions but handles case where base already contains suffix to avoid double
+    let url = crate::providers::chat_completions_url(&provider.base_url);
+    // Suffix normalisation is shared via providers::chat_completions_url to avoid double suffix.
     // Protocol is hardcoded to openai-completions — the server handles all formats at the same endpoint
     let req = ChatCompletionRequest {
         model: &model,

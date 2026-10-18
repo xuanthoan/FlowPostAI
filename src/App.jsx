@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { LayoutDashboard, Sparkles, Images, CalendarDays, Send, BarChart3, Settings, Search, TrendingUp, FileText, Heart, MessageCircle, Plus, Clock3, CircleCheck, MoreHorizontal, WandSparkles, Zap, Upload, HardDrive, Film, Trash2, RefreshCw, X, Pencil } from 'lucide-react'
 import { invokeDesktop, isDesktop, localAssetUrl } from './tauri.js'
+import { DEFAULT_LOCAL_BASE_URL, PROVIDER_PRESETS, isDefaultLocalBase } from './providerPresets'
 
 function weekdayLabel(date) {
   const d = date.getDay()
@@ -82,13 +83,14 @@ function ProvidersPanel() {
   const desktop = isDesktop()
   const [providers, setProviders] = useState([])
   const [activeId, setActiveId] = useState('')
-  const [form, setForm] = useState({ id: 'custom-provider', displayName: 'Custom provider', baseUrl: 'http://127.0.0.1:20128/v1', apiKey: '', models: [] })
+  const [form, setForm] = useState({ id: '', displayName: '', baseUrl: DEFAULT_LOCAL_BASE_URL, apiKey: '', models: [] })
+  const [presetKey, setPresetKey] = useState('')
   const [hasApiKey, setHasApiKey] = useState(false)
   const [modelInput, setModelInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
-  const [isEditing, setIsEditing] = useState(false)
+  const [mode, setMode] = useState('create')
 
   const load = async () => {
     if (!desktop) return
@@ -102,11 +104,13 @@ function ProvidersPanel() {
           const found = list.find(p => p.id === a.id)
           if (found) active = found
         } catch (_e) { void _e }
+        setActiveId(active.id)
         setForm({ id: active.id, displayName: active.displayName || active.id, baseUrl: active.baseUrl, apiKey: '', models: active.models || [] })
         setHasApiKey(!!active.hasApiKey)
-        setIsEditing(true)
+        setMode('edit')
+        setPresetKey('')
       } else {
-        setIsEditing(false)
+        setMode('create')
         setActiveId('')
       }
     } catch (e) { setErr(String(e)) }
@@ -117,15 +121,42 @@ function ProvidersPanel() {
     if (!p) return
     setForm({ id: p.id, displayName: p.displayName || p.id, baseUrl: p.baseUrl, apiKey: '', models: p.models || [] })
     setHasApiKey(!!p.hasApiKey)
-    setIsEditing(true)
+    setMode('edit')
+    setPresetKey('')
     setErr(''); setMsg('')
   }
 
   const handleAddNew = () => {
-    setForm({ id: '', displayName: '', baseUrl: 'http://127.0.0.1:20128/v1', apiKey: '', models: [] })
+    setForm({ id: '', displayName: '', baseUrl: DEFAULT_LOCAL_BASE_URL, apiKey: '', models: [] })
     setHasApiKey(false)
-    setIsEditing(false)
+    setMode('create')
+    setPresetKey('custom')
     setErr(''); setMsg('')
+  }
+
+  const applyPreset = (key) => {
+    setPresetKey(key)
+    const preset = PROVIDER_PRESETS.find(p => p.key === key)
+    if (!preset) return
+    setForm(f => {
+      const next = { ...f }
+      if (!next.id.trim() && preset.id) next.id = preset.id
+      if (!next.displayName.trim() && preset.displayName) next.displayName = preset.displayName
+      next.baseUrl = preset.baseUrl
+      next.models = [...preset.models]
+      return next
+    })
+    setMsg(`Đã áp mẫu ${preset.label}`)
+    setErr('')
+  }
+
+  const setActive = async (id) => {
+    setBusy(true); setErr(''); setMsg('')
+    try {
+      await invokeDesktop('set_active_provider', { id })
+      await load()
+      setMsg('Đã đặt provider đang dùng')
+    } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -133,14 +164,15 @@ function ProvidersPanel() {
   const handleSave = async () => {
     if (!form.id.trim()) { setErr('Provider ID không được để trống'); return }
     if (!form.baseUrl.trim()) { setErr('Base URL không được để trống'); return }
+    if (!isDefaultLocalBase(form.baseUrl) && form.models.length < 1) { setErr('Cần ít nhất 1 model cho provider'); return }
     setBusy(true); setErr(''); setMsg('')
     try {
-      if (!isEditing) {
-        const payload = { id: form.id.trim().toLowerCase(), displayName: form.displayName || null, baseUrl: form.baseUrl, protocol: 'openai-completions', models: form.models.length ? form.models : null, apiKey: form.apiKey || null }
+      if (mode === 'create') {
+        const payload = { id: form.id.trim().toLowerCase(), displayName: form.displayName || null, baseUrl: form.baseUrl.trim(), protocol: 'openai-completions', models: form.models, apiKey: form.apiKey || null }
         await invokeDesktop('create_provider', { payload })
         setMsg('Đã tạo provider')
       } else {
-        const payload = { displayName: form.displayName || null, baseUrl: form.baseUrl, protocol: 'openai-completions', models: form.models, apiKey: form.apiKey || null }
+        const payload = { displayName: form.displayName || null, baseUrl: form.baseUrl.trim(), protocol: 'openai-completions', models: form.models, apiKey: form.apiKey || null }
         await invokeDesktop('update_provider', { id: form.id, payload })
         setMsg('Đã cập nhật provider')
       }
@@ -151,12 +183,16 @@ function ProvidersPanel() {
 
   const handleFetch = async () => {
     if (!form.id.trim()) { setErr('Chưa có Provider ID'); return }
+    if (mode === 'create') { setErr('Hãy lưu provider trước khi fetch models'); return }
     setBusy(true); setErr(''); setMsg('')
     try {
       const models = await invokeDesktop('fetch_provider_models', { id: form.id })
-      const merged = Array.from(new Set([...form.models, ...models]))
-      setForm(f => ({ ...f, models: merged }))
-      setMsg(`Đã fetch ${models.length} models`)
+      const changed = form.models.length !== models.length || form.models.some(m => !models.includes(m))
+      if (form.models.length && changed) {
+        if (!window.confirm(`Thay thế ${form.models.length} model hiện tại bằng ${models.length} model từ provider?`)) return
+      }
+      setForm(f => ({ ...f, models }))
+      setMsg(`Đã thay thế bằng ${models.length} models`)
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
 
@@ -167,6 +203,7 @@ function ProvidersPanel() {
     setForm(f => ({ ...f, models: [...f.models, m] })); setModelInput('')
   }
   const removeModel = (m) => setForm(f => ({ ...f, models: f.models.filter(x => x !== m) }))
+  const currentPreset = PROVIDER_PRESETS.find(p => p.key === presetKey)
 
   return <div style={{display:'flex', flexDirection:'column', gap:14}}>
     {err && <div className="error-box">{err}</div>}
@@ -176,23 +213,35 @@ function ProvidersPanel() {
       <div style={{display:'flex', flexDirection:'column', gap:6}}>
         {providers.map(p=> <div key={p.id} onClick={()=>selectProvider(p.id)} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 10px', border: p.id===form.id ? '2px solid #6558d6' : '1px solid #e8e8ed', borderRadius:8, background: p.id===activeId ? '#f0eefc' : '#fff', cursor:'pointer'}}>
           <div style={{display:'flex', alignItems:'center', gap:8}}><strong style={{fontSize:13}}>{p.displayName || p.id}</strong><span style={{width:8, height:8, borderRadius:8, background: p.hasApiKey ? '#4caf50' : '#ccc', display:'inline-block'}} title={p.hasApiKey ? 'Đã lưu API key' : 'Chưa có key'}/><span style={{fontSize:11, color:'#777'}}>{p.id}</span></div>
-          <span style={{fontSize:11, color: p.id===activeId ? '#6558d6' : '#999'}}>{p.id===activeId ? '● active' : ''} {p.id===form.id ? '● đang sửa' : ''}</span>
+          <div style={{display:'flex', alignItems:'center', gap:8}}>
+            <span style={{fontSize:11, color: p.id===activeId ? '#6558d6' : '#999'}}>{p.id===activeId ? '● active' : ''} {p.id===form.id && mode==='edit' ? '● đang sửa' : ''}</span>
+            {p.id!==activeId && <button className="outline" onClick={(e)=>{ e.stopPropagation(); setActive(p.id) }} disabled={!desktop||busy} style={{height:26, fontSize:11}}>Đặt active</button>}
+          </div>
         </div>)}
       </div>
     </div>}
     <div className="panel" style={{padding:16, display:'flex', flexDirection:'column', gap:12}}>
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-        <div style={{display:'flex', alignItems:'center', gap:8}}><strong style={{fontSize:14}}>{form.displayName || form.id || 'Custom provider'}</strong><span style={{fontSize:12, background:'#f0eefc', color:'#6558d6', padding:'2px 7px', borderRadius:10, fontWeight:700}}>Custom</span><span style={{width:8, height:8, borderRadius:8, background: hasApiKey ? '#4caf50' : '#ccc', display:'inline-block'}}/></div>
+        <div style={{display:'flex', alignItems:'center', gap:8}}><strong style={{fontSize:14}}>{form.displayName || form.id || 'Custom provider'}</strong><span style={{fontSize:12, background:'#f0eefc', color:'#6558d6', padding:'2px 7px', borderRadius:10, fontWeight:700}}>{mode==='create' ? 'Mới' : 'Đang sửa'}</span><span style={{width:8, height:8, borderRadius:8, background: hasApiKey ? '#4caf50' : '#ccc', display:'inline-block'}}/></div>
         <div style={{display:'flex', gap:6}}>
-          <button className="outline" onClick={()=>{ setIsEditing(!isEditing); setErr(''); setMsg('') }} disabled={!desktop || busy} style={{height:32, fontSize:13}}>{isEditing ? 'Edit' : 'Create'}</button>
           <button className="outline" onClick={async()=>{ if(!window.confirm('Xóa provider này?')) return; try{ await invokeDesktop('delete_provider',{id:form.id}); setMsg('Đã xóa'); await load() }catch(e){setErr(String(e))} }} disabled={!desktop || busy || providers.length<=1} title={providers.length<=1 ? 'Không thể xóa provider cuối cùng' : ''} style={{height:32, fontSize:13, color: providers.length<=1 ? '#aaa' : '#b55041', borderColor: providers.length<=1 ? '#eee' : '#f6d4cd'}}>Delete</button>
         </div>
       </div>
       <div style={{height:1, background:'#eee'}}/>
       <div style={{display:'flex', flexDirection:'column', gap:10}}>
         <div>
+          <label style={{fontSize:13, fontWeight:700}}>Mẫu provider nhanh</label>
+          <div style={{display:'flex', alignItems:'center', gap:10, marginTop:6}}>
+            <select value={presetKey} onChange={e=>applyPreset(e.target.value)} disabled={busy} style={{height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', fontSize:14, background:'#fff'}}>
+              <option value="">-- Chọn mẫu --</option>
+              {PROVIDER_PRESETS.map(p=> <option key={p.key} value={p.key}>{p.label}</option>)}
+            </select>
+            {currentPreset?.docsUrl && <a href={currentPreset.docsUrl} target="_blank" rel="noreferrer" style={{fontSize:12, color:'#777'}}>Lấy API key</a>}
+          </div>
+        </div>
+        <div>
           <label style={{fontSize:13, fontWeight:700}}>Provider ID</label>
-          <input value={form.id} onChange={e=>setForm(f=>({...f, id:e.target.value}))} disabled={isEditing || busy} placeholder="acme-gateway" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14, background: isEditing ? '#f9fafb' : '#fff'}}/>
+          <input value={form.id} onChange={e=>setForm(f=>({...f, id:e.target.value}))} disabled={mode==='edit' || busy} placeholder="acme-gateway" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14, background: mode==='edit' ? '#f9fafb' : '#fff'}}/>
           <div style={{fontSize:12, color:'#777', marginTop:4}}>Lowercase identifier, starting with a letter, that uniquely names this provider in requests and as its credential name.</div>
         </div>
         <div>
@@ -224,7 +273,7 @@ function ProvidersPanel() {
       </div>
       <div style={{display:'flex', justifyContent:'flex-end', gap:8, marginTop:6}}>
         <button className="outline" onClick={()=>{ setErr(''); setMsg(''); load() }} disabled={busy} style={{height:36}}>Cancel</button>
-        <button className="primary" onClick={handleSave} disabled={!desktop || busy} style={{height:36}}><WandSparkles size={14}/> {isEditing ? 'Update provider' : 'Create provider'}</button>
+        <button className="primary" onClick={handleSave} disabled={!desktop || busy} style={{height:36}}><WandSparkles size={14}/> {mode==='create' ? 'Tạo provider' : 'Cập nhật provider'}</button>
       </div>
     </div>
   </div>

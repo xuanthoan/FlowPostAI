@@ -16,6 +16,8 @@ window.__TAURI_INTERNALS__ = {};
         return [{ id: 'custom-provider', displayName: 'Custom provider', baseUrl: baseUrl, protocol: 'openai-completions', models: ['xoay-vong-worker-web-128k'], hasApiKey: true }];
       case 'get_active_provider':
         return { id: 'custom-provider', displayName: 'Custom provider', baseUrl: baseUrl, protocol: 'openai-completions', models: ['xoay-vong-worker-web-128k'], hasApiKey: true };
+      case 'set_active_provider':
+        return { id: args?.id, hasApiKey: true };
       case 'update_provider': {
         const protocol = args?.payload?.protocol;
         const validProtocols = ['openai-completions', 'openai-responses', 'anthropic-messages'];

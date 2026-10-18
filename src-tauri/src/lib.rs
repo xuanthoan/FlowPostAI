@@ -383,6 +383,7 @@ pub fn run() {
             providers::update_provider,
             providers::delete_provider,
             providers::fetch_provider_models,
+            providers::set_active_provider,
             content::list_content,
             content::get_content,
             content::save_content,
