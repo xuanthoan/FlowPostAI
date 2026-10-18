@@ -44,6 +44,16 @@ export const PROVIDER_PRESETS = [
     docsUrl: 'https://platform.deepseek.com/api_keys',
   },
   {
+    key: 'muse',
+    label: 'Muse (Meta Model API)',
+    id: 'muse',
+    displayName: 'Muse (Meta Model API)',
+    baseUrl: 'https://api.meta.ai/v1',
+    protocol: 'openai-completions',
+    models: ['muse-spark-1.3', 'muse-spark-1.1'],
+    docsUrl: 'https://dev.meta.ai/',
+  },
+  {
     key: 'custom',
     label: 'Custom / OpenAI-compatible',
     id: '',

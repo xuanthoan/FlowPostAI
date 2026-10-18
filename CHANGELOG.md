@@ -4,7 +4,7 @@ Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở �
 
 ## [Unreleased] - 2026-10-18 — Onboarding provider AI theo chuẩn OpenAI Compatibility (preset + fix fetch/save models)
 ### Added
-- `src/providerPresets.js` — catalog 5 preset: ChatGPT (OpenAI), Google Gemini, Anthropic Claude, DeepSeek, Custom/OpenAI-compatible (dùng cho "muse" khi có base URL) + helper `isDefaultLocalBase`
+- `src/providerPresets.js` — catalog 6 preset: ChatGPT (OpenAI), Google Gemini, Anthropic Claude, DeepSeek, Muse (Meta Model API), Custom/OpenAI-compatible + helper `isDefaultLocalBase`
 - `src/App.jsx` `ProvidersPanel` — dropdown "Mẫu provider nhanh" điền sẵn base URL + model gợi ý (không ghi đè id/display name đang có); badge `● active` phản ánh provider đang dùng; nút `Đặt active` trên mỗi dòng chưa active; nút lưu đổi thành `Tạo provider`/`Cập nhật provider` (bỏ toggle Edit/Create mập mờ)
 - `src-tauri/src/providers.rs` — command `set_active_provider` (chọn provider đang dùng) + đăng ký trong `lib.rs`
 ### Fixed
@@ -21,7 +21,7 @@ Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở �
 - `cargo test --lib` 103 passed / 0 failed (91 cũ + 12 mới); `cargo check`/`cargo build` OK (7 warning dead-code có sẵn, không phát sinh cảnh báo mới); `npm run build` OK (2395 modules); `npm run lint` exit 0 (do implementer chạy; QA bị chặn bởi sandbox allowlist nên không chạy lại độc lập được); Playwright `--list` parse OK (8 test providers). Chạy e2e runtime cần cửa sổ Tauri (`npm run tauri:dev`) → chưa xác minh.
 ### Notes
 - Provider luôn dùng `protocol = openai-completions` (Gemini/Claude/DeepSeek/OpenAI đều hỗ trợ chuẩn này); chưa expose UI chọn protocol.
-- "muse" chưa có base URL chính thức → dùng preset Custom/OpenAI-compatible.
+- "muse" = preset Muse (Meta Model API): base URL https://api.meta.ai/v1, chuẩn OpenAI-compatible (chat/completions), Bearer `MODEL_API_KEY`; model gợi ý muse-spark-1.3 / muse-spark-1.1 (tham khảo).
 - Model gợi ý trong preset chỉ mang tính tham khảo; nút "Fetch available models" là nguồn chân lý.
 - Base URL nhập ở dạng nào cũng được (`https://api.deepseek.com` hay `.../v1`, có/không `/chat/completions`) vì cả generate và fetch models dùng chung một hàm chuẩn hoá.
 
