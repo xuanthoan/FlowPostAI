@@ -2,6 +2,19 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-18 — Fix AI trả về tiêu đề cụt + thân bài rỗng (Gemini thinking budget)
+### Fixed
+- `src-tauri/src/ai.rs` — Gemini 2.5/3.x là thinking model; trên endpoint OpenAI-compat, `max_tokens` bị tính chung cho cả phần suy luận lẫn output hiển thị nên 250/500/800 token bị "đốt" hết vào suy luận → model cắt còn đúng một dòng tiêu đề dở (`finish_reason:"length"`) và thân bài rỗng, nhưng app vẫn báo "Đã tạo nội dung". Nay app hạ `reasoning_effort` cho host Gemini, phát hiện `finish_reason == "length"`, thử lại 1 lần với ngân sách token gấp đôi, và báo lỗi tiếng Việt rõ ràng thay vì "thành công giả" khi thân bài rỗng
+### Changed
+- `src-tauri/src/ai.rs` — `max_tokens` theo độ dài: 250/500/800 → 1024/2048/4096 (Ngắn/Vừa/Dài); thêm trần `AI_MAX_TOKENS_CAP = 8192`
+- `src-tauri/src/ai.rs` — gửi `reasoning_effort: "low"` CHỈ tới host Google Gemini (`generativelanguage.googleapis.com`); provider khác không gửi field này
+- `src-tauri/src/ai.rs` — `parse_ai_response` nhận thêm separator 2 dòng trống (`\n\n\n`) đúng như system prompt yêu cầu (trước đây chỉ tách theo `\n---\n` hoặc dòng đầu)
+### Verified
+- `cargo test --lib` → `test result: ok. 119 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s` (103 cũ + 16 mới, gồm 1 test HTTP thật bằng wiremock cho retry); `cargo check` 0 lỗi (7 warning dead-code có sẵn); `cargo build` OK; `npm run build` → `✓ 2395 modules transformed` / `✓ built in 12.47s`; `npm run lint` exit 0 (do implementer chạy); Playwright `--list` OK (20 test)
+### Notes
+- Hành vi Gemini không thể xác minh offline nếu không có API key thật — người dùng cần chạy `npm run tauri:dev` để kiểm chứng end-to-end.
+- Khối xử lý mojibake giữ nguyên byte-for-byte; marker `MOJIBAKE_REPAIR_VERSION = "v3"` vẫn hoạt động.
+
 ## [Unreleased] - 2026-10-18 — Onboarding provider AI theo chuẩn OpenAI Compatibility (preset + fix fetch/save models)
 ### Added
 - `src/providerPresets.js` — catalog 6 preset: ChatGPT (OpenAI), Google Gemini, Anthropic Claude, DeepSeek, Muse (Meta Model API), Custom/OpenAI-compatible + helper `isDefaultLocalBase`

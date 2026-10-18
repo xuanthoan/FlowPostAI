@@ -44,6 +44,8 @@ struct ChatCompletionRequest<'a> {
     messages: Vec<Message<'a>>,
     max_tokens: u32,
     temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<&'a str>,
 }
 
 #[derive(Serialize)]
@@ -52,19 +54,36 @@ struct Message<'a> {
     content: &'a str,
 }
 
+fn deserialize_null_default<'de, D>(d: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(d)?.unwrap_or_default())
+}
+
+#[derive(Deserialize, Default)]
+struct MessageResponse {
+    #[serde(default, deserialize_with = "deserialize_null_default")]
+    content: String,
+}
+
+#[derive(Deserialize, Default)]
+struct Choice {
+    #[serde(default)]
+    message: MessageResponse,
+    #[serde(default)]
+    finish_reason: Option<String>,
+}
+
 #[derive(Deserialize)]
 struct ChatCompletionResponse {
+    #[serde(default)]
     choices: Vec<Choice>,
 }
 
-#[derive(Deserialize)]
-struct Choice {
-    message: MessageResponse,
-}
-
-#[derive(Deserialize)]
-struct MessageResponse {
+struct RawCompletion {
     content: String,
+    finish_reason: Option<String>,
 }
 
 // --- openai-responses protocol ---
@@ -278,6 +297,9 @@ fn parse_ai_response(content: &str) -> (String, String) {
     // Try to split by \n---\n delimiter for title/body
     let (raw_title, raw_body) = if let Some(idx) = content.find("\n---\n") {
         (content[..idx].to_string(), content[idx + 5..].to_string())
+    } else if let Some(idx) = content.find("\n\n\n") {
+        // System prompt asks for 2 blank lines between title and body.
+        (content[..idx].to_string(), content[idx + 3..].to_string())
     } else {
         // Fallback: first line is title, rest is body
         let lines: Vec<&str> = content.lines().collect();
@@ -306,61 +328,101 @@ fn log_mojibake_preview(s: &str) {
     );
 }
 
-fn max_tokens_for_length(length: Option<&str>) -> u32 {
-    match length {
-        Some("Ngắn") => 250,
-        Some("Dài") => 800,
-        _ => 500,
+const AI_MAX_TOKENS_CAP: u32 = 8192;
+
+pub(crate) const EMPTY_BODY_ERROR: &str =
+    "AI không trả về nội dung (có thể bị cắt do giới hạn token). Vui lòng thử lại, chọn độ dài khác hoặc đổi model/provider.";
+
+fn ensure_body_present(body: &str) -> Result<(), String> {
+    if body.trim().is_empty() {
+        Err(EMPTY_BODY_ERROR.into())
+    } else {
+        Ok(())
     }
 }
 
-async fn call_ai_provider(
-    app: &AppHandle<impl Runtime>,
-    prompt: &str,
-    style: &str,
-    custom_style: Option<&str>,
-    length: Option<&str>,
-) -> Result<String, String> {
-    let (provider, key) = crate::providers::resolve_active_provider(app)?;
-    let system_msg = build_system_message(style, custom_style);
-    let max_tokens = max_tokens_for_length(length);
-    let model = provider
-        .models
-        .first()
-        .cloned()
-        .unwrap_or_else(|| crate::providers::DEFAULT_MODEL.to_string());
-    let url = crate::providers::chat_completions_url(&provider.base_url);
-    // Suffix normalisation is shared via providers::chat_completions_url to avoid double suffix.
-    // Protocol is hardcoded to openai-completions — the server handles all formats at the same endpoint
-    let req = ChatCompletionRequest {
-        model: &model,
+fn max_tokens_for_length(length: Option<&str>) -> u32 {
+    match length {
+        Some("Ngắn") => 1024,
+        Some("Dài") => 4096,
+        _ => 2048,
+    }
+}
+
+fn build_chat_request<'a>(
+    model: &'a str,
+    system_msg: &'a str,
+    prompt: &'a str,
+    max_tokens: u32,
+    is_gemini: bool,
+) -> ChatCompletionRequest<'a> {
+    ChatCompletionRequest {
+        model,
         messages: vec![
-            Message { role: "system", content: &system_msg },
+            Message { role: "system", content: system_msg },
             Message { role: "user", content: prompt },
         ],
         max_tokens,
         temperature: 0.7,
-    };
-    let body = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+        reasoning_effort: if is_gemini { Some("low") } else { None },
+    }
+}
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(AI_TIMEOUT_SECS))
-        .http1_only()
-        .build()
-        .map_err(|e| format!("Không thể khởi tạo HTTP client: {}", e))?;
+/// Detect Google Gemini hosts so we can lower the reasoning budget.
+/// Gemini 2.5/3.x are thinking models: on the OpenAI-compat endpoint the
+/// reasoning tokens are charged against `max_tokens`, truncating the visible
+/// output unless `reasoning_effort` is lowered.
+fn is_gemini_base_url(base_url: &str) -> bool {
+    match reqwest::Url::parse(base_url) {
+        Ok(url) => match url.host_str() {
+            Some(host) => {
+                let host = host.to_lowercase();
+                host == "generativelanguage.googleapis.com"
+                    || host.ends_with(".generativelanguage.googleapis.com")
+            }
+            None => false,
+        },
+        Err(_) => false,
+    }
+}
 
-    let req_builder = client
-        .post(&url)
+fn decide_retry(
+    finish_reason: Option<&str>,
+    content: &str,
+    current_max_tokens: u32,
+    retries_done: u32,
+) -> Option<u32> {
+    if retries_done >= 1 {
+        return None;
+    }
+    let bad = finish_reason == Some("length") || content.trim().is_empty();
+    if !bad {
+        return None;
+    }
+    let next = current_max_tokens.saturating_mul(2).min(AI_MAX_TOKENS_CAP);
+    if next > current_max_tokens {
+        Some(next)
+    } else {
+        None
+    }
+}
+
+async fn send_chat_once(
+    client: &reqwest::Client,
+    url: &str,
+    key: &str,
+    body: &str,
+) -> Result<RawCompletion, String> {
+    let resp = client
+        .post(url)
         .header("Authorization", format!("Bearer {}", key))
-        .header("Content-Type", "application/json; charset=utf-8");
-    let resp = req_builder
-        .body(body)
+        .header("Content-Type", "application/json; charset=utf-8")
+        .body(body.to_string())
         .send()
         .await
         .map_err(|e| {
-            let url_str = url.clone();
-            eprintln!("[FlowPost AI] AI request failed: url={} error={:#}", url_str, e);
-            format!("Không thể kết nối AI provider: {} (url: {})", e, url_str)
+            eprintln!("[FlowPost AI] AI request failed: url={} error={:#}", url, e);
+            format!("Không thể kết nối AI provider: {} (url: {})", e, url)
         })?;
 
     let status = resp.status().as_u16();
@@ -369,38 +431,9 @@ async fn call_ai_provider(
 
     if status >= 200 && status < 300 {
         if response_body.trim_start().starts_with("data:") || response_body.contains("\ndata:") {
-            // SSE streaming: collect delta.content
-            let mut combined = String::new();
-            for line in response_body.lines() {
-                let trimmed = line.trim();
-                if !trimmed.starts_with("data:") { continue; }
-                let json_str = trimmed.trim_start_matches("data:").trim();
-                if json_str == "[DONE]" || json_str.is_empty() { continue; }
-                if let Ok(val) = serde_json::from_str::<Value>(json_str) {
-                    if let Some(choices) = val.get("choices").and_then(|c| c.as_array()) {
-                        for choice in choices {
-                            if let Some(content) = choice.get("delta").and_then(|d| d.get("content")).and_then(|c| c.as_str()) {
-                                combined.push_str(content);
-                            } else if let Some(content) = choice.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
-                                combined.push_str(content);
-                            }
-                        }
-                    } else if let Some(content) = val.get("choices").and_then(|c| c.as_array()).and_then(|arr| arr.first()).and_then(|ch| ch.get("delta")).and_then(|d| d.get("content")).and_then(|c| c.as_str()) { combined.push_str(content); }
-                }
-            }
-            if !combined.trim().is_empty() {
-                Ok(combined)
-            } else {
-                Err(format!("Phản hồi AI rỗng (SSE): {}", &response_body.chars().take(300).collect::<String>()))
-            }
+            parse_sse_response(&response_body)
         } else {
-            // Try non-streaming JSON
-            let parsed: ChatCompletionResponse = serde_json::from_str(&response_body).map_err(|e| format!("Không parse được phản hồi AI: {} body={}", e, &response_body.chars().take(500).collect::<String>()))?;
-            if let Some(choice) = parsed.choices.first() {
-                Ok(choice.message.content.clone())
-            } else {
-                Err("Phản hồi AI không có choices".into())
-            }
+            parse_json_completion(&response_body)
         }
     } else {
         let error_msg = match status {
@@ -423,6 +456,120 @@ async fn call_ai_provider(
     }
 }
 
+fn parse_json_completion(body: &str) -> Result<RawCompletion, String> {
+    let parsed: ChatCompletionResponse = serde_json::from_str(body).map_err(|e| {
+        format!(
+            "Không parse được phản hồi AI: {} body={}",
+            e,
+            &body.chars().take(500).collect::<String>()
+        )
+    })?;
+    let choice = parsed
+        .choices
+        .first()
+        .ok_or_else(|| "Phản hồi AI không có choices".to_string())?;
+    Ok(RawCompletion {
+        content: choice.message.content.clone(),
+        finish_reason: choice.finish_reason.clone(),
+    })
+}
+
+fn parse_sse_response(body: &str) -> Result<RawCompletion, String> {
+    // SSE streaming: collect delta.content (reusing the historical loop logic).
+    let mut combined = String::new();
+    let mut finish_reason: Option<String> = None;
+    let mut saw_data = false;
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("data:") { continue; }
+        saw_data = true;
+        let json_str = trimmed.trim_start_matches("data:").trim();
+        if json_str == "[DONE]" || json_str.is_empty() { continue; }
+        if let Ok(val) = serde_json::from_str::<Value>(json_str) {
+            if let Some(choices) = val.get("choices").and_then(|c| c.as_array()) {
+                for choice in choices {
+                    if let Some(content) = choice.get("delta").and_then(|d| d.get("content")).and_then(|c| c.as_str()) {
+                        combined.push_str(content);
+                    } else if let Some(content) = choice.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()) {
+                        combined.push_str(content);
+                    }
+                    if let Some(fr) = choice.get("finish_reason").and_then(|f| f.as_str()) {
+                        finish_reason = Some(fr.to_string());
+                    }
+                }
+            } else if let Some(content) = val.get("choices").and_then(|c| c.as_array()).and_then(|arr| arr.first()).and_then(|ch| ch.get("delta")).and_then(|d| d.get("content")).and_then(|c| c.as_str()) { combined.push_str(content); }
+        }
+    }
+    if !saw_data {
+        return Err("Phản hồi AI không phải SSE hợp lệ".into());
+    }
+    Ok(RawCompletion {
+        content: combined,
+        finish_reason,
+    })
+}
+
+async fn complete_with_retry(
+    client: &reqwest::Client,
+    url: &str,
+    key: &str,
+    model: &str,
+    system_msg: &str,
+    prompt: &str,
+    initial_max_tokens: u32,
+    is_gemini: bool,
+) -> Result<RawCompletion, String> {
+    let mut max_tokens = initial_max_tokens;
+    let mut retries_done: u32 = 0;
+    loop {
+        let req = build_chat_request(model, system_msg, prompt, max_tokens, is_gemini);
+        let body = serde_json::to_string(&req).map_err(|e| e.to_string())?;
+        let raw = send_chat_once(client, url, key, &body).await?;
+        match decide_retry(raw.finish_reason.as_deref(), &raw.content, max_tokens, retries_done) {
+            Some(next) => {
+                eprintln!(
+                    "[FlowPost AI] completion truncated/empty (finish_reason={:?}, len={}) retrying with max_tokens={}",
+                    raw.finish_reason, raw.content.chars().count(), next
+                );
+                max_tokens = next;
+                retries_done += 1;
+            }
+            None => {
+                eprintln!("[FlowPost AI] completion accepted (finish_reason={:?}, len={})", raw.finish_reason, raw.content.chars().count());
+                return Ok(raw);
+            }
+        }
+    }
+}
+
+async fn call_ai_provider(
+    app: &AppHandle<impl Runtime>,
+    prompt: &str,
+    style: &str,
+    custom_style: Option<&str>,
+    length: Option<&str>,
+) -> Result<RawCompletion, String> {
+    let (provider, key) = crate::providers::resolve_active_provider(app)?;
+    let max_tokens = max_tokens_for_length(length);
+    let model = provider
+        .models
+        .first()
+        .cloned()
+        .unwrap_or_else(|| crate::providers::DEFAULT_MODEL.to_string());
+    let url = crate::providers::chat_completions_url(&provider.base_url);
+    // Suffix normalisation is shared via providers::chat_completions_url to avoid double suffix.
+    // Protocol is hardcoded to openai-completions — the server handles all formats at the same endpoint
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(AI_TIMEOUT_SECS))
+        .http1_only()
+        .build()
+        .map_err(|e| format!("Không thể khởi tạo HTTP client: {}", e))?;
+
+    let is_gemini = is_gemini_base_url(&provider.base_url);
+    let system_msg = build_system_message(style, custom_style);
+    complete_with_retry(&client, &url, &key, &model, &system_msg, prompt, max_tokens, is_gemini).await
+}
+
 #[tauri::command]
 pub async fn generate_content<R: Runtime>(app: AppHandle<R>, payload: GeneratePayload) -> Result<GenerateResult, String> {
     eprintln!("[FlowPost AI] generate_content: mojibake-repair {}", MOJIBAKE_REPAIR_VERSION);
@@ -433,11 +580,12 @@ pub async fn generate_content<R: Runtime>(app: AppHandle<R>, payload: GeneratePa
         return Err("Vui lòng chọn style".into());
     }
 
-    let content = call_ai_provider(&app, &payload.prompt, &payload.style, payload.custom_style.as_deref(), payload.length.as_deref()).await?;
-    let (title, body) = parse_ai_response(&content);
+    let raw = call_ai_provider(&app, &payload.prompt, &payload.style, payload.custom_style.as_deref(), payload.length.as_deref()).await?;
+    let (title, body) = parse_ai_response(&raw.content);
     if looks_like_mojibake(&title) || looks_like_mojibake(&body) {
-        log_mojibake_preview(&content);
+        log_mojibake_preview(&raw.content);
     }
+    ensure_body_present(&body)?;
 
     Ok(GenerateResult {
         title,
@@ -615,6 +763,7 @@ mod tests {
             ],
             max_tokens: 500,
             temperature: 0.7,
+            reasoning_effort: None,
         };
         let json = serde_json::to_string(&request).unwrap();
         assert!(json.contains("xoay-vong-worker-web-128k"));
@@ -623,11 +772,212 @@ mod tests {
 
     #[test]
     fn test_max_tokens_for_length() {
-        assert_eq!(max_tokens_for_length(None), 500);
-        assert_eq!(max_tokens_for_length(Some("Vừa")), 500);
-        assert_eq!(max_tokens_for_length(Some("Ngắn")), 250);
-        assert_eq!(max_tokens_for_length(Some("Dài")), 800);
-        assert_eq!(max_tokens_for_length(Some("unknown")), 500);
+        assert_eq!(max_tokens_for_length(None), 2048);
+        assert_eq!(max_tokens_for_length(Some("Vừa")), 2048);
+        assert_eq!(max_tokens_for_length(Some("Ngắn")), 1024);
+        assert_eq!(max_tokens_for_length(Some("Dài")), 4096);
+        assert_eq!(max_tokens_for_length(Some("unknown")), 2048);
+    }
+
+    #[test]
+    fn test_build_chat_request_gemini_includes_reasoning_effort_low() {
+        let req = build_chat_request("m", "sys", "user", 2048, true);
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"reasoning_effort\":\"low\""), "json={}", json);
+    }
+
+    #[test]
+    fn test_build_chat_request_non_gemini_omits_reasoning_effort() {
+        let req = build_chat_request("m", "sys", "user", 2048, false);
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(!json.contains("reasoning_effort"), "json={}", json);
+    }
+
+    #[test]
+    fn test_is_gemini_base_url() {
+        assert!(is_gemini_base_url("https://generativelanguage.googleapis.com/v1beta/openai"));
+        assert!(!is_gemini_base_url("https://api.openai.com/v1"));
+        assert!(!is_gemini_base_url("http://127.0.0.1:20128/v1"));
+        assert!(!is_gemini_base_url("https://api.anthropic.com/v1"));
+        assert!(!is_gemini_base_url("not a url"));
+    }
+
+    #[test]
+    fn test_decide_retry_length_doubles_once() {
+        assert_eq!(decide_retry(Some("length"), "", 2048, 0), Some(4096));
+        assert_eq!(decide_retry(Some("length"), "", 2048, 1), None);
+        assert_eq!(decide_retry(Some("length"), "x", 8192, 0), None);
+    }
+
+    #[test]
+    fn test_decide_retry_clean_completion_is_accepted() {
+        assert_eq!(decide_retry(Some("stop"), "nội dung", 2048, 0), None);
+    }
+
+    #[test]
+    fn test_decide_retry_empty_content_retries() {
+        assert_eq!(decide_retry(None, "   ", 1024, 0), Some(2048));
+    }
+
+    #[test]
+    fn test_parse_ai_response_blank_line_separator() {
+        let (title, body) = parse_ai_response("TIÊU ĐỀ\n\n\nThân bài ở đây");
+        assert_eq!(title, "TIÊU ĐỀ");
+        assert_eq!(body, "Thân bài ở đây");
+        assert!(!body.is_empty());
+    }
+
+    #[test]
+    fn test_parse_ai_response_single_line_still_empty_body() {
+        let (title, body) = parse_ai_response("Chỉ một dòng");
+        assert_eq!(title, "CHỈ MỘT DÒNG");
+        assert_eq!(body, "");
+    }
+
+    #[test]
+    fn test_parse_json_completion_null_content_is_empty() {
+        let raw = parse_json_completion(
+            r#"{"choices":[{"message":{"content":null},"finish_reason":"length"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(raw.content, "");
+        assert_eq!(raw.finish_reason.as_deref(), Some("length"));
+
+        let raw2 = parse_json_completion(r#"{"choices":[{},{"message":{}}]}"#).unwrap();
+        assert_eq!(raw2.content, "");
+        assert_eq!(raw2.finish_reason, None);
+    }
+
+    #[test]
+    fn test_parse_json_completion_reads_finish_reason() {
+        let raw = parse_json_completion(
+            r#"{"choices":[{"message":{"content":"hello"},"finish_reason":"stop"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(raw.content, "hello");
+        assert_eq!(raw.finish_reason.as_deref(), Some("stop"));
+    }
+
+    #[test]
+    fn test_parse_sse_response_detects_finish_reason_length() {
+        let body = "data: {\"choices\":[{\"delta\":{\"content\":\"SÁT THỦ\"}}]}\n\n\
+                    data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n\
+                    data: [DONE]\n\n";
+        let raw = parse_sse_response(body).unwrap();
+        assert_eq!(raw.content, "SÁT THỦ");
+        assert_eq!(raw.finish_reason.as_deref(), Some("length"));
+    }
+
+    #[test]
+    fn test_parse_sse_response_accumulates_content() {
+        let body = "data: {\"choices\":[{\"delta\":{\"content\":\"Thân \"}}]}\n\n\
+                    data: {\"choices\":[{\"delta\":{\"content\":\"bài\"}}]}\n\n\
+                    data: [DONE]\n\n";
+        let raw = parse_sse_response(body).unwrap();
+        assert_eq!(raw.content, "Thân bài");
+        assert_eq!(raw.finish_reason, None);
+    }
+
+    #[test]
+    fn test_ensure_body_present_rejects_blank() {
+        assert_eq!(ensure_body_present(""), Err(EMPTY_BODY_ERROR.to_string()));
+        assert_eq!(ensure_body_present("   \n "), Err(EMPTY_BODY_ERROR.to_string()));
+        assert!(ensure_body_present("ok").is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_complete_with_retry_retries_on_length_and_returns_second_response() {
+        let mock_server = MockServer::start().await;
+
+        // First response: truncated title, finish_reason "length". Served at most once.
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "choices": [{
+                    "message": { "content": "SÁT THỦ HOÀN HẢO" },
+                    "finish_reason": "length"
+                }]
+            })))
+            .up_to_n_times(1)
+            .with_priority(1)
+            .mount(&mock_server)
+            .await;
+
+        // Second response: full body, finish_reason "stop".
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "choices": [{
+                    "message": { "content": "TIÊU ĐỀ\n\n\nThân bài đầy đủ" },
+                    "finish_reason": "stop"
+                }]
+            })))
+            .with_priority(2)
+            .mount(&mock_server)
+            .await;
+
+        let client = reqwest::Client::builder().http1_only().build().unwrap();
+        let url = format!("{}/v1/chat/completions", mock_server.uri());
+        let raw =
+            complete_with_retry(&client, &url, "test_key_123", "m", "sys", "user", 2048, false)
+                .await
+                .unwrap();
+        assert_eq!(raw.content, "TIÊU ĐỀ\n\n\nThân bài đầy đủ");
+        assert_eq!(raw.finish_reason.as_deref(), Some("stop"));
+
+        let requests = mock_server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2, "expected exactly 2 POSTs");
+        let first: Value = requests[0].body_json().unwrap();
+        let second: Value = requests[1].body_json().unwrap();
+        assert_eq!(first["max_tokens"], 2048);
+        assert_eq!(second["max_tokens"], 4096);
+    }
+
+    #[tokio::test]
+    async fn test_complete_with_retry_no_retry_on_stop() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "choices": [{
+                    "message": { "content": "Tiêu đề\n\n\nThân bài" },
+                    "finish_reason": "stop"
+                }]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = reqwest::Client::builder().http1_only().build().unwrap();
+        let url = format!("{}/v1/chat/completions", mock_server.uri());
+        let raw =
+            complete_with_retry(&client, &url, "test_key_123", "m", "sys", "user", 2048, false)
+                .await
+                .unwrap();
+        assert_eq!(raw.content, "Tiêu đề\n\n\nThân bài");
+
+        let requests = mock_server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1, "expected exactly 1 POST");
+    }
+
+    #[tokio::test]
+    async fn test_complete_with_retry_sends_reasoning_effort_for_gemini() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(build_mock_response("Tiêu đề\n\n\nThân bài"))
+            .mount(&mock_server)
+            .await;
+
+        let client = reqwest::Client::builder().http1_only().build().unwrap();
+        let url = format!("{}/v1/chat/completions", mock_server.uri());
+        let _ = complete_with_retry(&client, &url, "test_key_123", "m", "sys", "user", 2048, true)
+            .await
+            .unwrap();
+
+        let requests = mock_server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        let body: Value = requests[0].body_json().unwrap();
+        assert_eq!(body["reasoning_effort"], "low");
     }
 
     // endpoint_for_protocol removed — base_url is now used directly as the full endpoint URL.
