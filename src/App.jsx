@@ -411,6 +411,7 @@ function AiContentPage() {
   const [styleDraft, setStyleDraft] = useState({ id: '', name: '', content: '', builtin: false })
   const [creatingStyle, setCreatingStyle] = useState(false)
   const [styleBusy, setStyleBusy] = useState(false)
+  const [styleModalOpen, setStyleModalOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [busy, setBusy] = useState(false)
@@ -464,17 +465,38 @@ function AiContentPage() {
     setCreatingStyle(false)
   }
 
+  const selectedStyle = styles.find(s => s.id === selectedStyleId) || null
+  const stylePreview = ((selectedStyle && selectedStyle.content) || '').replace(/\s+/g, ' ').trim()
+
   const startCreateStyle = () => {
     setCreatingStyle(true)
     setStyleDraft({ id: '', name: '', content: '', builtin: false })
     setErr(''); setMsg('')
   }
 
-  const cancelCreateStyle = () => {
+  const openCreateStyleModal = () => {
+    startCreateStyle()
+    setErr('')
+    setStyleModalOpen(true)
+  }
+
+  const openEditStyleModal = () => {
+    if (!selectedStyle) return
     setCreatingStyle(false)
-    const s = styles.find(x => x.id === selectedStyleId)
-    if (s) setStyleDraft({ id: s.id, name: s.name, content: s.content, builtin: !!s.builtin })
-    setErr(''); setMsg('')
+    setStyleDraft({ id: selectedStyle.id, name: selectedStyle.name, content: selectedStyle.content, builtin: !!selectedStyle.builtin })
+    setErr('')
+    setStyleModalOpen(true)
+  }
+
+  const closeStyleModal = () => {
+    if (creatingStyle) {
+      setStyleDraft({ id: '', name: '', content: '', builtin: false })
+    } else {
+      const s = styles.find(x => x.id === selectedStyleId)
+      if (s) setStyleDraft({ id: s.id, name: s.name, content: s.content, builtin: !!s.builtin })
+    }
+    setErr('')
+    setStyleModalOpen(false)
   }
 
   const saveStyle = async () => {
@@ -486,6 +508,7 @@ function AiContentPage() {
       await loadStyles()
       applyStyleResult(res)
       setMsg(creatingStyle ? 'Đã thêm style mới' : 'Đã cập nhật style')
+      setStyleModalOpen(false)
     } catch (e) { setErr(String(e)) } finally { setStyleBusy(false) }
   }
 
@@ -506,7 +529,7 @@ function AiContentPage() {
       await invokeDesktop('delete_style', { id: styleDraft.id })
       await loadStyles()
       setMsg('Đã xóa style')
-      setCreatingStyle(false)
+      closeStyleModal()
     } catch (e) { setErr(String(e)) } finally { setStyleBusy(false) }
   }
 
@@ -568,30 +591,18 @@ function AiContentPage() {
           <button className="primary" onClick={generate} disabled={!desktop || busy || !prompt.trim()} style={{width:'100%', height:36, justifyContent:'center'}}><Sparkles size={16}/> {busy ? 'Đang tạo...' : 'Tạo nội dung'}</button>
         </div>
       </div>
-      <div style={{border:'1px solid #e8e8ed', borderRadius:10, padding:14, display:'flex', flexDirection:'column', gap:12, background:'#fafaff'}}>
-        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-          <label style={{fontSize:14, fontWeight:700}}>{creatingStyle ? 'Thêm style mới' : 'Cấu hình style'}</label>
-          {!creatingStyle && <span style={{fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:999, background: styleDraft.builtin ? '#efeeff' : '#eef7ee', color: styleDraft.builtin ? '#6558d6' : '#2e6b2e'}}>{styleDraft.builtin ? 'Mặc định' : 'Tùy chỉnh'}</span>}
+      <div style={{border:'1px solid #e8e8ed', borderRadius:10, padding:12, display:'flex', flexDirection:'column', gap:4, background:'#fafaff'}}>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, flexWrap:'wrap'}}>
+          <div style={{display:'flex', alignItems:'center', gap:8}}>
+            <span style={{fontSize:13, fontWeight:700}}>Cấu hình style</span>
+            <span style={{fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:999, background: selectedStyle && selectedStyle.builtin ? '#efeeff' : '#eef7ee', color: selectedStyle && selectedStyle.builtin ? '#6558d6' : '#2e6b2e'}}>{selectedStyle && selectedStyle.builtin ? 'Mặc định' : 'Tùy chỉnh'}</span>
+          </div>
+          <div style={{display:'flex', gap:8}}>
+            <button className="outline" onClick={openEditStyleModal} disabled={!desktop || busy || styleBusy || !selectedStyleId} style={{height:32}}><Pencil size={14}/> Sửa</button>
+            <button className="outline" onClick={openCreateStyleModal} disabled={!desktop || busy || styleBusy} style={{height:32}}><Plus size={14}/> Thêm style</button>
+          </div>
         </div>
-        <div>
-          <label style={{fontSize:13, fontWeight:600}}>Tên style</label>
-          <input value={styleDraft.name} onChange={e=>setStyleDraft(d=>({...d, name:e.target.value}))} maxLength={60} disabled={busy || styleBusy} placeholder="VD: Hài hước GenZ" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
-        </div>
-        <div>
-          <label style={{fontSize:13, fontWeight:600}}>Nội dung style</label>
-          <textarea value={styleDraft.content} onChange={e=>setStyleDraft(d=>({...d, content:e.target.value}))} rows={12} maxLength={4000} disabled={busy || styleBusy} placeholder="Mô tả đầy đủ giọng văn và cấu trúc bài viết cho style này..." style={{width:'100%', minHeight:140, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical', fontFamily:'inherit'}}/>
-          <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{styleDraft.content.length}/4000</div>
-        </div>
-        {!creatingStyle ? <div style={{display:'flex', gap:8, flexWrap:'wrap', justifyContent:'flex-end'}}>
-          <button className="outline" onClick={saveStyle} disabled={busy || styleBusy || !styleDraft.id} style={{height:32}}><FileText size={14}/> Lưu thay đổi</button>
-          <button className="outline" onClick={duplicateStyle} disabled={busy || styleBusy || !styleDraft.id} style={{height:32}}>Nhân bản</button>
-          <button className="outline" onClick={deleteStyle} disabled={busy || styleBusy || styleDraft.builtin || !styleDraft.id} title={styleDraft.builtin ? 'Không thể xóa style mặc định' : ''} style={{height:32}}>Xóa</button>
-          {styleDraft.builtin && <button className="outline" onClick={resetStyle} disabled={busy || styleBusy} style={{height:32}}>Khôi phục mặc định</button>}
-          <button className="outline" onClick={startCreateStyle} disabled={busy || styleBusy} style={{height:32}}><Plus size={14}/> Thêm style mới</button>
-        </div> : <div style={{display:'flex', gap:8, justifyContent:'flex-end'}}>
-          <button className="outline" onClick={cancelCreateStyle} disabled={busy || styleBusy} style={{height:32}}>Hủy</button>
-          <button className="primary" onClick={saveStyle} disabled={busy || styleBusy} style={{height:32}}><FileText size={14}/> Lưu style</button>
-        </div>}
+        <div style={{display:'flex', alignItems:'center', gap:6, marginTop:6, color:'#6b6b76', fontSize:13, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}><FileText size={14}/><span style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{stylePreview || 'Chưa có nội dung style'}</span></div>
       </div>
       <div style={{height:1, background:'#eee'}}/>
       <div>
@@ -615,6 +626,37 @@ function AiContentPage() {
         <button className="primary" onClick={save} disabled={!desktop || busy} style={{height:36}}><FileText size={16}/> Lưu vào kho</button>
       </div>
     </div>
+    {styleModalOpen && (
+      <div onClick={e=>{ if (e.target === e.currentTarget) closeStyleModal() }} style={{position:'fixed', inset:0, background:'#0006', display:'grid', placeItems:'center', zIndex:50}}>
+        <div role="dialog" aria-modal="true" aria-label={creatingStyle ? 'Thêm style mới' : 'Sửa style'} className="panel" onKeyDown={e=>{ if (e.key === 'Escape') closeStyleModal() }} style={{width:'min(560px, 92vw)', maxHeight:'86vh', overflow:'auto', background:'#fff', borderRadius:12, padding:16, display:'grid', gap:10}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:8}}>
+            <label style={{fontSize:14, fontWeight:700}}>{creatingStyle ? 'Thêm style mới' : 'Sửa style'}</label>
+            <div style={{display:'flex', alignItems:'center', gap:8}}>
+              {!creatingStyle && <span style={{fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:999, background: styleDraft.builtin ? '#efeeff' : '#eef7ee', color: styleDraft.builtin ? '#6558d6' : '#2e6b2e'}}>{styleDraft.builtin ? 'Mặc định' : 'Tùy chỉnh'}</span>}
+              <button className="outline" onClick={closeStyleModal} style={{height:32}}>Đóng</button>
+            </div>
+          </div>
+          <div>
+            <label style={{fontSize:13, fontWeight:600}}>Tên style</label>
+            <input value={styleDraft.name} onChange={e=>setStyleDraft(d=>({...d, name:e.target.value}))} maxLength={60} disabled={busy || styleBusy} placeholder="VD: Hài hước GenZ" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
+          </div>
+          <div>
+            <label style={{fontSize:13, fontWeight:600}}>Nội dung style</label>
+            <textarea value={styleDraft.content} onChange={e=>setStyleDraft(d=>({...d, content:e.target.value}))} rows={12} maxLength={4000} disabled={busy || styleBusy} placeholder="Mô tả đầy đủ giọng văn và cấu trúc bài viết cho style này..." style={{width:'100%', minHeight:140, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical', fontFamily:'inherit'}}/>
+            <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{styleDraft.content.length}/4000</div>
+          </div>
+          {err && <div className="error-box">{err}</div>}
+          {msg && <div className="desktop-notice" style={{background:'#eef7ee', borderColor:'#cde9cd', color:'#2e6b2e'}}><CircleCheck size={18}/><span>{msg}</span></div>}
+          <div style={{display:'flex', gap:8, flexWrap:'wrap', justifyContent:'flex-end'}}>
+            <button className="primary" onClick={saveStyle} disabled={busy || styleBusy} style={{height:32}}><FileText size={14}/> Lưu thay đổi</button>
+            <button className="outline" onClick={duplicateStyle} disabled={creatingStyle || !styleDraft.id || styleBusy} style={{height:32}}>Nhân bản</button>
+            <button className="outline" onClick={resetStyle} disabled={!styleDraft.builtin || styleBusy} style={{height:32}}>Khôi phục mặc định</button>
+            <button className="outline" onClick={deleteStyle} disabled={styleDraft.builtin || !styleDraft.id || styleBusy} style={{height:32, color:'#b55041'}}>Xóa</button>
+            <button className="outline" onClick={closeStyleModal} style={{height:32}}>Đóng</button>
+          </div>
+        </div>
+      </div>
+    )}
   </section>
 }
 
