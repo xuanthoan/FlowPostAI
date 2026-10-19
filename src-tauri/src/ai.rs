@@ -86,7 +86,7 @@ fn prompt_seed() -> u64 {
 /// Single pass: a `[` is matched to the next `]`, the inner text is trimmed and
 /// lower-cased, and only an exact (case-insensitive) list-name match is replaced.
 /// Unknown placeholders are kept verbatim. Inserted text is never rescanned.
-fn expand_prompt(
+pub fn expand_prompt(
     template: &str,
     lists: &[crate::topics::TopicList],
     seed: u64,
@@ -224,9 +224,9 @@ struct ChatCompletionResponse {
     choices: Vec<Choice>,
 }
 
-struct RawCompletion {
-    content: String,
-    finish_reason: Option<String>,
+pub struct RawCompletion {
+    pub content: String,
+    pub finish_reason: Option<String>,
 }
 
 // --- openai-responses protocol ---
@@ -434,7 +434,7 @@ pub(crate) fn repair_mojibake(s: &str) -> String {
     cur
 }
 
-fn parse_ai_response(content: &str) -> (String, String) {
+pub fn parse_ai_response(content: &str) -> (String, String) {
     let repaired = repair_mojibake(content);
     let content: &str = &repaired;
     // Try to split by \n---\n delimiter for title/body
@@ -694,16 +694,29 @@ async fn call_ai_provider(
     custom_style: Option<&str>,
     style_content: Option<&str>,
 ) -> Result<RawCompletion, String> {
-    let (provider, key) = crate::providers::resolve_active_provider(app)?;
+    call_ai_provider_with(app, prompt, style, custom_style, style_content, None, None).await
+}
+
+pub async fn call_ai_provider_with<R: Runtime>(
+    app: &AppHandle<R>,
+    prompt: &str,
+    style: &str,
+    custom_style: Option<&str>,
+    style_content: Option<&str>,
+    provider_id: Option<&str>,
+    model: Option<&str>,
+) -> Result<RawCompletion, String> {
+    let (provider, key) = if let Some(pid) = provider_id {
+        crate::providers::resolve_provider_by_id(app, pid)?
+    } else {
+        crate::providers::resolve_active_provider(app)?
+    };
     let max_tokens = DEFAULT_MAX_TOKENS;
-    let model = provider
-        .models
-        .first()
-        .cloned()
+    let model = model
+        .map(|m| m.to_string())
+        .or_else(|| provider.models.first().cloned())
         .unwrap_or_else(|| crate::providers::DEFAULT_MODEL.to_string());
     let url = crate::providers::chat_completions_url(&provider.base_url);
-    // Suffix normalisation is shared via providers::chat_completions_url to avoid double suffix.
-    // Protocol is hardcoded to openai-completions — the server handles all formats at the same endpoint
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(AI_TIMEOUT_SECS))
         .http1_only()

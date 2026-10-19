@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -56,7 +56,7 @@ pub fn compose_facebook_post(title: &str, body: &str) -> String {
     }
 }
 
-fn content_dir(app: &AppHandle) -> Result<PathBuf, String> {
+fn content_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_data_dir()
@@ -66,11 +66,11 @@ fn content_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-fn content_index_path(app: &AppHandle) -> Result<PathBuf, String> {
+fn content_index_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     Ok(content_dir(app)?.join("content-index.json"))
 }
 
-fn read_content_index(app: &AppHandle) -> Result<Vec<ContentItem>, String> {
+fn read_content_index<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<ContentItem>, String> {
     let path = content_index_path(app)?;
     if !path.exists() {
         return Ok(Vec::new());
@@ -87,7 +87,7 @@ fn read_content_index(app: &AppHandle) -> Result<Vec<ContentItem>, String> {
     Ok(items)
 }
 
-fn write_content_index(app: &AppHandle, items: &[ContentItem]) -> Result<(), String> {
+fn write_content_index<R: Runtime>(app: &AppHandle<R>, items: &[ContentItem]) -> Result<(), String> {
     let path = content_index_path(app)?;
     let tmp = path.with_extension("json.tmp");
     let json = serde_json::to_string_pretty(items).map_err(|e| e.to_string())?;
@@ -130,32 +130,36 @@ pub fn get_content(app: AppHandle, id: String) -> Result<Option<ContentItem>, St
     Ok(items.into_iter().find(|c| c.id == id))
 }
 
-#[tauri::command]
-pub fn save_content(app: AppHandle, payload: SaveContentPayload) -> Result<ContentItem, String> {
+pub fn save_content_item<R: Runtime>(app: &AppHandle<R>, payload: &SaveContentPayload) -> Result<ContentItem, String> {
     if payload.title.trim().is_empty() && payload.body.trim().is_empty() {
         return Err("Tiêu đề hoặc nội dung không được để trống".into());
     }
     if payload.prompt.trim().is_empty() {
         return Err("Prompt không được để trống".into());
     }
-    let mut items = read_content_index(&app)?;
+    let mut items = read_content_index(app)?;
     let now = Utc::now();
     let item = ContentItem {
         id: uuid::Uuid::new_v4().to_string(),
         title: payload.title.trim().to_string(),
         body: payload.body.trim().to_string(),
         prompt: payload.prompt.trim().to_string(),
-        style: payload.style,
-        topic: normalize_topic(payload.topic),
-        custom_style: payload.custom_style.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
-        media_ids: payload.media_ids.unwrap_or_default(),
+        style: payload.style.clone(),
+        topic: normalize_topic(payload.topic.clone()),
+        custom_style: payload.custom_style.clone().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+        media_ids: payload.media_ids.clone().unwrap_or_default(),
         status: ContentStatus::Draft,
         created_at: now,
         updated_at: now,
     };
     items.push(item.clone());
-    write_content_index(&app, &items)?;
+    write_content_index(app, &items)?;
     Ok(item)
+}
+
+#[tauri::command]
+pub fn save_content(app: AppHandle, payload: SaveContentPayload) -> Result<ContentItem, String> {
+    save_content_item(&app, &payload)
 }
 
 #[tauri::command]
@@ -172,6 +176,20 @@ pub fn delete_content(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command]
 pub fn update_content_status(
     app: AppHandle,
+    id: String,
+    status: ContentStatus,
+) -> Result<ContentItem, String> {
+    let mut items = read_content_index(&app)?;
+    let pos = items.iter().position(|c| c.id == id).ok_or_else(|| format!("Không tìm thấy {}", id))?;
+    items[pos].status = status;
+    items[pos].updated_at = Utc::now();
+    let updated = items[pos].clone();
+    write_content_index(&app, &items)?;
+    Ok(updated)
+}
+
+pub fn update_content_status_generic<R: Runtime>(
+    app: AppHandle<R>,
     id: String,
     status: ContentStatus,
 ) -> Result<ContentItem, String> {

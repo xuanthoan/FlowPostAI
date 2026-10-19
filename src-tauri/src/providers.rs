@@ -301,6 +301,27 @@ fn default_file() -> ProvidersFile {
     }
 }
 
+pub fn resolve_provider_by_id<R: Runtime>(
+    app: &AppHandle<R>,
+    provider_id: &str,
+) -> Result<(Provider, String), String> {
+    let file = read_providers_file(app)?;
+    let provider = file
+        .providers
+        .iter()
+        .find(|p| p.id == provider_id)
+        .cloned()
+        .ok_or("Không tìm thấy provider")?;
+    let key = crate::security::get_secret_hybrid(Some(app), &api_key_name(&provider.id))
+        .ok()
+        .flatten()
+        .ok_or("Không tìm thấy API key cho provider")?;
+    if key.trim().is_empty() {
+        return Err("Không tìm thấy API key cho provider".into());
+    }
+    Ok((provider, key))
+}
+
 pub fn resolve_active_provider<R: Runtime>(
     app: &AppHandle<R>,
 ) -> Result<(Provider, String), String> {
@@ -310,13 +331,41 @@ pub fn resolve_active_provider<R: Runtime>(
         .iter()
         .find(|p| p.id == file.active_provider_id)
         .cloned()
-        .ok_or("Không tìm thấy active provider")?;
+        .ok_or_else(|| "Không tìm thấy active provider".to_string())?;
     let key = crate::security::get_secret_hybrid(Some(app), &api_key_name(&provider.id))
         .ok()
         .flatten()
-        .ok_or("Chưa cấu hình API key. Vui lòng vào Cài đặt để thêm key.")?;
+        .ok_or_else(|| "Không tìm thấy API key cho provider".to_string())?;
     if key.trim().is_empty() {
-        return Err("API key trống, vui lòng kiểm tra lại.".into());
+        return Err("Không tìm thấy API key cho provider".into());
+    }
+    Ok((provider, key))
+}
+
+#[cfg(test)]
+pub fn resolve_provider_by_id_at<R: Runtime>(
+    app: &AppHandle<R>,
+    provider_id: &str,
+    base_dir: Option<PathBuf>,
+) -> Result<(Provider, String), String> {
+    let file = if let Some(dir) = base_dir {
+        let path = dir.join("providers.json");
+        read_providers_file_at(&path)?
+    } else {
+        read_providers_file(app)?
+    };
+    let provider = file
+        .providers
+        .iter()
+        .find(|p| p.id == provider_id)
+        .cloned()
+        .ok_or("Không tìm thấy provider")?;
+    let key = crate::security::get_secret_hybrid(Some(app), &api_key_name(&provider.id))
+        .ok()
+        .flatten()
+        .ok_or("Không tìm thấy API key cho provider")?;
+    if key.trim().is_empty() {
+        return Err("Không tìm thấy API key cho provider".into());
     }
     Ok((provider, key))
 }

@@ -7,6 +7,7 @@ use std::{
 use tauri::{AppHandle, Manager};
 
 mod ai;
+mod auto_schedule;
 mod content;
 mod facebook;
 mod providers;
@@ -366,7 +367,8 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                let _ = schedule::start_scheduler(handle).await;
+                let _ = schedule::start_scheduler(handle.clone()).await;
+                let _ = auto_schedule::start_auto_scheduler(handle);
             });
             Ok(())
         })
@@ -419,7 +421,17 @@ pub fn run() {
             schedule::set_scheduler_config,
             schedule::select_scheduler_page,
             schedule::start_scheduler,
-            schedule::stop_scheduler
+            schedule::stop_scheduler,
+            auto_schedule::list_auto_schedule,
+            auto_schedule::get_auto_schedule,
+            auto_schedule::create_auto_schedule,
+            auto_schedule::update_auto_schedule,
+            auto_schedule::delete_auto_schedule,
+            auto_schedule::toggle_auto_schedule,
+            auto_schedule::get_auto_scheduler_config,
+            auto_schedule::set_auto_scheduler_config,
+            auto_schedule::start_auto_scheduler_cmd,
+            auto_schedule::stop_auto_scheduler_cmd
         ])
         .run(tauri::generate_context!())
         .expect("error while running FlowPost AI");

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { LayoutDashboard, Sparkles, Images, CalendarDays, Send, BarChart3, Settings, Search, TrendingUp, FileText, Heart, MessageCircle, Plus, Clock3, CircleCheck, MoreHorizontal, WandSparkles, Zap, Upload, HardDrive, Film, Trash2, RefreshCw, X, Pencil } from 'lucide-react'
+import { LayoutDashboard, Sparkles, Images, CalendarDays, Send, BarChart3, Settings, Search, TrendingUp, FileText, Heart, MessageCircle, Plus, Clock3, CircleCheck, MoreHorizontal, WandSparkles, Zap, Upload, HardDrive, Film, Trash2, RefreshCw, X, Pencil, Bot } from 'lucide-react'
 import { invokeDesktop, isDesktop, localAssetUrl } from './tauri.js'
 import { DEFAULT_LOCAL_BASE_URL, PROVIDER_PRESETS, isDefaultLocalBase } from './providerPresets'
 
@@ -19,7 +19,7 @@ function getGreeting(date = new Date()) {
 
 const nav = [
   ['Tổng quan', LayoutDashboard], ['AI Content', Sparkles], ['Kho nội dung', FileText],
-  ['Thư viện media', Images], ['Lịch nội dung', CalendarDays], ['Đăng bài', Send], ['Báo cáo', BarChart3],
+  ['Thư viện media', Images], ['Lịch nội dung', CalendarDays], ['Lịch AI tự động', Bot], ['Đăng bài', Send], ['Báo cáo', BarChart3],
 ]
 
 function StatCard({ icon: Icon, iconClass, label, value, delta, sub }) {
@@ -1431,7 +1431,7 @@ function App() {
     <main>
       <header><div className="search"><Search size={18}/><input spellCheck={false} aria-label="Tìm kiếm" placeholder="Tìm kiếm nội dung, bài viết..." disabled style={{opacity:0.6}}/></div><div className="head-actions"><button className="primary" onClick={createPost}><Plus size={19}/> Tạo nội dung mới</button></div></header>
       <div className="content">
-        {active === 'AI Content' ? <AiContentPage/> : active === 'Kho nội dung' ? <ContentWarehousePage/> : active === 'Thư viện media' ? <MediaLibrary/> : active === 'Lịch nội dung' ? <SchedulePage/> : active === 'Cài đặt' ? <SettingsPage/> : <>
+        {active === 'AI Content' ? <AiContentPage/> : active === 'Kho nội dung' ? <ContentWarehousePage/> : active === 'Thư viện media' ? <MediaLibrary/> : active === 'Lịch nội dung' ? <SchedulePage/> : active === 'Lịch AI tự động' ? <AutoSchedulePage desktop={desktop} /> : active === 'Cài đặt' ? <SettingsPage/> : <>
         <section className="welcome"><div><p>{today}</p><h1>{getGreeting()}</h1><div className="welcome-sub">Hôm nay bạn có <b>{dashboardScheduled} bài viết</b> đang chờ được đăng.</div></div><button className="outline" onClick={()=>setActive('Lịch nội dung')}><CalendarDays size={17}/> Xem lịch nội dung</button></section>
 
         <section className="stats-grid">
@@ -1460,6 +1460,216 @@ function App() {
     </main>
     {toast && <div className="toast"><CircleCheck size={19}/><div><strong>Đã mở trình tạo nội dung</strong><span>Sẵn sàng sáng tạo bài viết mới cùng AI.</span></div></div>}
   </div>
+}
+
+function AutoSchedulePage({ desktop }) {
+  const [items, setItems] = useState([])
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [msg, setMsg] = useState('')
+  const [editing, setEditing] = useState(null)
+  const [showModal, setShowModal] = useState(false)
+  const [styles, setStyles] = useState([])
+  const [providers, setProviders] = useState([])
+  const [config, setConfig] = useState({ intervalSeconds: 60, enabled: true })
+  const [form, setForm] = useState({
+    name: '', recurrenceType: 'fixed', fixedTimes: '08:00', intervalMinutes: 10,
+    prompt: '', style: '', providerId: '', model: '', autoApprove: false, enabled: true,
+  })
+
+  const load = async () => {
+    if (!desktop) return
+    setBusy(true)
+    try {
+      const [list, cfg, st, pv] = await Promise.all([
+        invokeDesktop('list_auto_schedule'),
+        invokeDesktop('get_auto_scheduler_config'),
+        invokeDesktop('list_styles'),
+        invokeDesktop('list_providers'),
+      ])
+      setItems(list || [])
+      setConfig({ intervalSeconds: cfg.intervalSeconds, enabled: cfg.enabled })
+      setStyles(st || [])
+      setProviders(pv || [])
+      if (!form.style && st && st.length) setForm(f => ({ ...f, style: st[0].id || st[0].name }))
+      setErr('')
+    } catch (e) { setErr(String(e)) } finally { setBusy(false) }
+  }
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const recurrenceDisplay = (r) => {
+    if (!r) return ''
+    if (r.type === 'fixedTimes' || r.fixedTimes) {
+      const times = r.times || r.fixedTimes || []
+      return times.join(', ')
+    }
+    if (r.type === 'interval' || r.minutes != null) {
+      const m = r.minutes || r.intervalMinutes
+      return `Mỗi ${m} phút`
+    }
+    // handle camelCase from backend: recurrence has kind? Actually backend enum serialized as {"fixedTimes":{"times":[...]}} or {"interval":{"minutes":...}}
+    if (r.fixedTimes) return (r.fixedTimes.times || []).join(', ')
+    if (r.interval) return `Mỗi ${r.interval.minutes} phút`
+    return JSON.stringify(r)
+  }
+
+  const normalizeRecurrence = (r) => {
+    // backend serde enum: { "fixedTimes": { "times": [...] } } or { "interval": { "minutes": ... } }
+    if (r.fixedTimes) return { kind: 'fixed', times: r.fixedTimes.times || [] }
+    if (r.interval) return { kind: 'interval', minutes: r.interval.minutes }
+    if (r.type === 'fixedTimes') return { kind: 'fixed', times: r.times || [] }
+    if (r.type === 'interval') return { kind: 'interval', minutes: r.minutes }
+    return { kind: 'fixed', times: [] }
+  }
+
+  const openCreate = () => {
+    setEditing(null)
+    setForm({ name: '', recurrenceType: 'fixed', fixedTimes: '08:00', intervalMinutes: 10, prompt: '', style: styles.length ? (styles[0].id || styles[0].name) : '', providerId: '', model: '', autoApprove: false, enabled: true })
+    setShowModal(true); setErr(''); setMsg('')
+  }
+  const openEdit = (item) => {
+    const rec = normalizeRecurrence(item.recurrence)
+    setEditing(item)
+    setForm({
+      name: item.name,
+      recurrenceType: rec.kind,
+      fixedTimes: rec.kind === 'fixed' ? rec.times.join(', ') : '08:00',
+      intervalMinutes: rec.kind === 'interval' ? rec.minutes : 10,
+      prompt: item.prompt,
+      style: item.style,
+      providerId: item.providerId || '',
+      model: item.model || '',
+      autoApprove: !!item.autoApprove,
+      enabled: !!item.enabled,
+    })
+    setShowModal(true); setErr(''); setMsg('')
+  }
+
+  const buildRecurrence = () => {
+    if (form.recurrenceType === 'fixed') {
+      const times = form.fixedTimes.split(',').map(s => s.trim()).filter(Boolean)
+      return { fixedTimes: { times } }
+    }
+    return { interval: { minutes: Number(form.intervalMinutes) } }
+  }
+
+  const save = async () => {
+    setBusy(true); setErr(''); setMsg('')
+    try {
+      const recurrence = buildRecurrence()
+      if (editing) {
+        await invokeDesktop('update_auto_schedule', { id: editing.id, payload: {
+          name: form.name, recurrence, prompt: form.prompt, style: form.style,
+          providerId: form.providerId || null, model: form.model || null,
+          autoApprove: form.autoApprove, enabled: form.enabled,
+        } })
+        setMsg('Đã cập nhật lịch AI')
+      } else {
+        await invokeDesktop('create_auto_schedule', { payload: {
+          name: form.name, recurrence, prompt: form.prompt, style: form.style,
+          providerId: form.providerId || null, model: form.model || null,
+          autoApprove: form.autoApprove,
+        } })
+        setMsg('Đã tạo lịch AI')
+      }
+      setShowModal(false); await load()
+    } catch (e) { setErr(String(e)) } finally { setBusy(false) }
+  }
+
+  const remove = async (id) => {
+    if (!window.confirm('Xóa lịch AI này?')) return
+    try { await invokeDesktop('delete_auto_schedule', { id }); await load() } catch (e) { setErr(String(e)) }
+  }
+  const toggle = async (item) => {
+    try { await invokeDesktop('toggle_auto_schedule', { id: item.id, enabled: !item.enabled }); await load() } catch (e) { setErr(String(e)) }
+  }
+
+  const saveConfig = async () => {
+    setBusy(true); setErr(''); setMsg('')
+    try {
+      const c = await invokeDesktop('set_auto_scheduler_config', { config: { intervalSeconds: Number(config.intervalSeconds), enabled: config.enabled } })
+      setConfig({ intervalSeconds: c.intervalSeconds, enabled: c.enabled })
+      setMsg('Đã lưu cấu hình scheduler')
+    } catch (e) { setErr(String(e)) } finally { setBusy(false) }
+  }
+
+  return <section className="media-page">
+    <div className="page-heading"><div><p>LỊCH AI TỰ ĐỘNG</p><h1>Lịch AI tự động</h1><span>Tự động tạo nội dung theo lịch và lưu vào Kho nội dung.</span></div><div className="media-actions"><button className="primary" onClick={openCreate} disabled={!desktop}><Plus size={16}/> Tạo lịch AI</button><button className="outline" onClick={load} disabled={!desktop || busy}><RefreshCw size={16}/> Làm mới</button></div></div>
+    {!desktop && <div className="desktop-notice"><HardDrive size={23}/><div><strong>Hãy mở bằng ứng dụng FlowPost AI Desktop</strong><span>Chỉ bản Tauri mới đọc được lịch.</span></div></div>}
+    {err && <div className="error-box">{err}</div>}
+    {msg && <div className="desktop-notice" style={{background:'#e8f5e9'}}><CircleCheck size={20}/><div><strong>{msg}</strong></div></div>}
+
+    <div className="panel" style={{padding:14, marginBottom:14}}>
+      <strong style={{fontSize:14}}>Cấu hình scheduler</strong>
+      <div style={{display:'flex', gap:10, alignItems:'center', marginTop:8, flexWrap:'wrap'}}>
+        <label style={{fontSize:13}}>Khoảng kiểm tra (giây): <input type="number" value={config.intervalSeconds} onChange={e=>setConfig(c=>({...c, intervalSeconds: e.target.value}))} style={{width:80, height:32, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px'}}/></label>
+        <label style={{fontSize:13, display:'flex', alignItems:'center', gap:6}}><input type="checkbox" checked={config.enabled} onChange={e=>setConfig(c=>({...c, enabled: e.target.checked}))}/> Bật scheduler</label>
+        <button className="primary" onClick={saveConfig} disabled={!desktop || busy} style={{height:32}}>Lưu cấu hình</button>
+      </div>
+    </div>
+
+    <div className="panel" style={{padding:0, overflow:'hidden'}}>
+      {items.length ? <div className="table-wrap"><table><thead><tr><th>TÊN</th><th>LỊCH</th><th>TRẠNG THÁI</th><th>LẦN CHẠY CUỐI</th><th>LỖI</th><th></th></tr></thead><tbody>{items.map(item => (
+        <tr key={item.id}>
+          <td><strong style={{fontSize:14}}>{item.name}</strong></td>
+          <td>{recurrenceDisplay(item.recurrence)}</td>
+          <td><button className="outline" onClick={()=>toggle(item)} style={{height:28, fontSize:12}}>{item.enabled ? 'Bật' : 'Tắt'}</button></td>
+          <td style={{fontSize:12}}>{item.lastRunAt ? new Date(item.lastRunAt).toLocaleString('vi-VN') : '—'}</td>
+          <td style={{fontSize:12, color:'#c62828', maxWidth:200, wordBreak:'break-word'}}>{item.lastError || '—'}</td>
+          <td><div style={{display:'flex', gap:4}}><button className="outline" onClick={()=>openEdit(item)} style={{height:30, fontSize:12}}><Pencil size={12}/> Sửa</button><button className="outline" onClick={()=>remove(item.id)} style={{height:30, fontSize:12}}><Trash2 size={12}/> Xóa</button></div></td>
+        </tr>
+      ))}</tbody></table></div> : <div className="media-empty" style={{padding:30}}><div><Bot size={34}/></div><h2>Chưa có lịch AI nào</h2><p>Tạo lịch AI để tự động sinh nội dung.</p></div>}
+    </div>
+
+    {showModal && <div style={{position:'fixed', inset:0, background:'#0006', display:'grid', placeItems:'center', zIndex:55}} onClick={()=>setShowModal(false)}>
+      <div className="panel" style={{width:520, padding:16, display:'flex', flexDirection:'column', gap:10, maxHeight:'90vh', overflow:'auto'}} onClick={e=>e.stopPropagation()}>
+        <h3 style={{margin:0, fontSize:15}}>{editing ? 'Sửa lịch AI' : 'Tạo lịch AI'}</h3>
+        <label style={{fontSize:13}}>Tên
+          <input value={form.name} onChange={e=>setForm(f=>({...f, name: e.target.value}))} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:4}}/>
+        </label>
+        <label style={{fontSize:13}}>Loại lịch
+          <select value={form.recurrenceType} onChange={e=>setForm(f=>({...f, recurrenceType: e.target.value}))} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:4}}>
+            <option value="fixed">Giờ cố định</option>
+            <option value="interval">Khoảng thời gian</option>
+          </select>
+        </label>
+        {form.recurrenceType === 'fixed' ? (
+          <label style={{fontSize:13}}>Giờ (HH:MM, cách nhau dấu phẩy)
+            <input value={form.fixedTimes} onChange={e=>setForm(f=>({...f, fixedTimes: e.target.value}))} placeholder="08:00, 10:00" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:4}}/>
+          </label>
+        ) : (
+          <label style={{fontSize:13}}>Khoảng (phút)
+            <input type="number" value={form.intervalMinutes} onChange={e=>setForm(f=>({...f, intervalMinutes: e.target.value}))} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:4}}/>
+          </label>
+        )}
+        <label style={{fontSize:13}}>Prompt
+          <textarea value={form.prompt} onChange={e=>setForm(f=>({...f, prompt: e.target.value}))} rows={4} style={{width:'100%', border:'1px solid #e2e1e7', borderRadius:8, padding:'8px', marginTop:4}}/>
+        </label>
+        <label style={{fontSize:13}}>Style
+          <select value={form.style} onChange={e=>setForm(f=>({...f, style: e.target.value}))} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:4}}>
+            {styles.map(s => <option key={s.id || s.name} value={s.id || s.name}>{s.name || s.id}</option>)}
+          </select>
+        </label>
+        <label style={{fontSize:13}}>Provider (tùy chọn)
+          <select value={form.providerId} onChange={e=>setForm(f=>({...f, providerId: e.target.value}))} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:4}}>
+            <option value="">-- Mặc định --</option>
+            {providers.map(p => <option key={p.id} value={p.id}>{p.displayName || p.id}</option>)}
+          </select>
+        </label>
+        <label style={{fontSize:13}}>Model (tùy chọn)
+          <input value={form.model} onChange={e=>setForm(f=>({...f, model: e.target.value}))} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:4}}/>
+        </label>
+        <label style={{fontSize:13, display:'flex', alignItems:'center', gap:6}}><input type="checkbox" checked={form.autoApprove} onChange={e=>setForm(f=>({...f, autoApprove: e.target.checked}))}/> Tự động duyệt</label>
+        {editing && <label style={{fontSize:13, display:'flex', alignItems:'center', gap:6}}><input type="checkbox" checked={form.enabled} onChange={e=>setForm(f=>({...f, enabled: e.target.checked}))}/> Bật</label>}
+        {err && <div className="error-box">{err}</div>}
+        <div style={{display:'flex', justifyContent:'flex-end', gap:8}}>
+          <button className="outline" onClick={()=>setShowModal(false)} disabled={busy} style={{height:32}}>Đóng</button>
+          <button className="primary" onClick={save} disabled={busy} style={{height:32}}>{editing ? 'Cập nhật' : 'Tạo'}</button>
+        </div>
+      </div>
+    </div>}
+  </section>
 }
 
 export default App
