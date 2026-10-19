@@ -13,6 +13,7 @@ mod providers;
 mod schedule;
 mod security;
 mod styles;
+mod topics;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -398,6 +399,10 @@ pub fn run() {
             styles::duplicate_style,
             styles::delete_style,
             styles::reset_style,
+            topics::list_topics,
+            topics::create_topic,
+            topics::update_topic,
+            topics::delete_topic,
             schedule::list_schedule,
             schedule::get_schedule,
             schedule::create_schedule,

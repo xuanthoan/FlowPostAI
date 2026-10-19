@@ -27,12 +27,20 @@ pub struct ContentItem {
     pub prompt: String,
     pub style: String,
     #[serde(default)]
+    pub topic: Option<String>,
+    #[serde(default)]
     pub custom_style: Option<String>,
     #[serde(default)]
     pub media_ids: Vec<String>,
     pub status: ContentStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+fn normalize_topic(value: Option<String>) -> Option<String> {
+    value
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 pub const TITLE_BODY_SEPARATOR: &str = "\n\n\n";
@@ -103,6 +111,8 @@ pub struct SaveContentPayload {
     pub body: String,
     pub prompt: String,
     pub style: String,
+    #[serde(default)]
+    pub topic: Option<String>,
     pub custom_style: Option<String>,
     pub media_ids: Option<Vec<String>>,
 }
@@ -136,6 +146,7 @@ pub fn save_content(app: AppHandle, payload: SaveContentPayload) -> Result<Conte
         body: payload.body.trim().to_string(),
         prompt: payload.prompt.trim().to_string(),
         style: payload.style,
+        topic: normalize_topic(payload.topic),
         custom_style: payload.custom_style.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
         media_ids: payload.media_ids.unwrap_or_default(),
         status: ContentStatus::Draft,
@@ -181,6 +192,8 @@ pub struct UpdateContentPayload {
     pub body: String,
     pub prompt: String,
     pub style: String,
+    #[serde(default)]
+    pub topic: Option<String>,
     pub custom_style: Option<String>,
     pub media_ids: Option<Vec<String>>,
 }
@@ -200,6 +213,7 @@ pub fn update_content(app: AppHandle, payload: UpdateContentPayload) -> Result<C
     items[pos].body = payload.body.trim().to_string();
     items[pos].prompt = payload.prompt.trim().to_string();
     items[pos].style = payload.style;
+    items[pos].topic = normalize_topic(payload.topic);
     items[pos].custom_style = payload.custom_style.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     items[pos].media_ids = payload.media_ids.unwrap_or_default();
     items[pos].updated_at = Utc::now();
@@ -227,6 +241,7 @@ mod tests {
             body: "body".into(),
             prompt: "prompt".into(),
             style: "Viral".into(),
+            topic: None,
             custom_style: None,
             media_ids: vec![],
             status: ContentStatus::Draft,
@@ -426,5 +441,52 @@ mod tests {
         assert_eq!(compose_facebook_post("TIN", ""), "TIN");
         assert_eq!(compose_facebook_post("", "Thân"), "Thân");
         assert_eq!(compose_facebook_post("", ""), "");
+    }
+
+    #[test]
+    fn test_content_item_deserializes_legacy_json_without_topic() {
+        let json = serde_json::json!({
+            "id": "c1",
+            "title": "T",
+            "body": "B",
+            "prompt": "P",
+            "style": "Viral",
+            "customStyle": null,
+            "mediaIds": [],
+            "status": "draft",
+            "createdAt": "2026-10-19T00:00:00Z",
+            "updatedAt": "2026-10-19T00:00:00Z"
+        });
+        let item: ContentItem = serde_json::from_value(json).unwrap();
+        assert_eq!(item.topic, None);
+    }
+
+    #[test]
+    fn test_content_item_serializes_topic_name() {
+        let mut item = sample_item("id-topic", "Title");
+        item.topic = Some("Chủ đề".into());
+        let json = serde_json::to_string(&item).unwrap();
+        assert!(json.contains("\"topic\":"), "got {}", json);
+        let parsed: ContentItem = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.topic, Some("Chủ đề".into()));
+    }
+
+    #[test]
+    fn test_save_content_payload_accepts_missing_topic() {
+        let payload: SaveContentPayload = serde_json::from_value(serde_json::json!({
+            "title": "T",
+            "body": "B",
+            "prompt": "P",
+            "style": "Viral"
+        }))
+        .unwrap();
+        assert_eq!(payload.topic, None);
+    }
+
+    #[test]
+    fn test_normalize_topic_trims_and_drops_blank() {
+        assert_eq!(normalize_topic(Some("  Chủ đề  ".into())), Some("Chủ đề".into()));
+        assert_eq!(normalize_topic(Some("   ".into())), None);
+        assert_eq!(normalize_topic(None), None);
     }
 }

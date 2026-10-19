@@ -1,9 +1,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Runtime};
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const AI_TIMEOUT_SECS: u64 = 120;
+
+const MAX_EXPANDED_PROMPT_CHARS: usize = 12_000;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,6 +17,8 @@ pub struct GeneratePayload {
     pub custom_style: Option<String>,
     #[serde(default)]
     pub style_content: Option<String>,
+    #[serde(default)]
+    pub topic_lists: Vec<crate::topics::TopicList>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -22,8 +27,131 @@ pub struct GenerateResult {
     pub title: String,
     pub body: String,
     pub prompt: String,
+    pub prompt_used: String,
     pub style: String,
     pub is_mock: bool,
+}
+
+/// Small deterministic PRNG (SplitMix64) so placeholder expansion can be
+/// injected with a fixed seed in tests without adding a `rand` dependency.
+struct SplitMix64 {
+    state: u64,
+}
+
+impl SplitMix64 {
+    fn new(seed: u64) -> Self {
+        SplitMix64 { state: seed }
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    fn pick_index(&mut self, len: usize) -> usize {
+        if len == 0 {
+            return 0;
+        }
+        (self.next_u64() % (len as u64)) as usize
+    }
+}
+
+/// Non-deterministic seed for production expands: wall-clock nanos mixed with a
+/// process-wide counter so rapid successive calls still differ.
+fn prompt_seed() -> u64 {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let count = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let mixed = nanos ^ count.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    let mut z = mixed.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
+/// Expand `[tên danh sách]` placeholders using the supplied topic lists.
+///
+/// Single pass: a `[` is matched to the next `]`, the inner text is trimmed and
+/// lower-cased, and only an exact (case-insensitive) list-name match is replaced.
+/// Unknown placeholders are kept verbatim. Inserted text is never rescanned.
+fn expand_prompt(
+    template: &str,
+    lists: &[crate::topics::TopicList],
+    seed: u64,
+) -> Result<String, String> {
+    let mut table: Vec<(String, Vec<String>)> = Vec::new();
+    for list in lists {
+        let name = list.name.trim().to_lowercase();
+        if name.is_empty() {
+            continue;
+        }
+        let variants: Vec<String> = list
+            .variants
+            .iter()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .collect();
+        if variants.is_empty() {
+            continue;
+        }
+        if !table.iter().any(|(n, _)| *n == name) {
+            table.push((name, variants));
+        }
+    }
+
+    let mut rng = SplitMix64::new(seed);
+    let mut result = String::with_capacity(template.len());
+    let mut iter = template.char_indices().peekable();
+    while let Some((i, c)) = iter.next() {
+        if c != '[' {
+            result.push(c);
+            continue;
+        }
+        // `[` is one byte, so `i + 1` is a char boundary.
+        let rest = &template[i + 1..];
+        match rest.find(']') {
+            Some(close_rel) => {
+                let inner = &rest[..close_rel];
+                let close_abs = i + 1 + close_rel;
+                while let Some(&(k, _)) = iter.peek() {
+                    if k <= close_abs {
+                        iter.next();
+                    } else {
+                        break;
+                    }
+                }
+                let key = inner.trim().to_lowercase();
+                match table.iter().find(|(n, _)| *n == key) {
+                    Some((_, variants)) => {
+                        let pick = variants[rng.pick_index(variants.len())].clone();
+                        result.push_str(&pick);
+                    }
+                    None => {
+                        result.push('[');
+                        result.push_str(inner);
+                        result.push(']');
+                    }
+                }
+            }
+            None => {
+                // No closing bracket: the remainder is literal text.
+                result.push('[');
+                result.push_str(&template[i + 1..]);
+                break;
+            }
+        }
+    }
+
+    if result.chars().count() > MAX_EXPANDED_PROMPT_CHARS {
+        return Err("Prompt sau khi thay thế quá dài (tối đa 12000 ký tự). Vui lòng giảm số placeholder hoặc độ dài cụm từ.".into());
+    }
+    Ok(result)
 }
 
 fn build_system_message(style: &str, custom_style: Option<&str>, style_content: Option<&str>) -> String {
@@ -582,7 +710,8 @@ pub async fn generate_content<R: Runtime>(app: AppHandle<R>, payload: GeneratePa
         return Err("Vui lòng chọn style".into());
     }
 
-    let raw = call_ai_provider(&app, &payload.prompt, &payload.style, payload.custom_style.as_deref(), payload.style_content.as_deref()).await?;
+    let prompt_used = expand_prompt(&payload.prompt, &payload.topic_lists, prompt_seed())?;
+    let raw = call_ai_provider(&app, &prompt_used, &payload.style, payload.custom_style.as_deref(), payload.style_content.as_deref()).await?;
     let (title, body) = parse_ai_response(&raw.content);
     if looks_like_mojibake(&title) || looks_like_mojibake(&body) {
         log_mojibake_preview(&raw.content);
@@ -593,6 +722,7 @@ pub async fn generate_content<R: Runtime>(app: AppHandle<R>, payload: GeneratePa
         title,
         body,
         prompt: payload.prompt.clone(),
+        prompt_used,
         style: payload.style.clone(),
         is_mock: false,
     })
@@ -1279,5 +1409,160 @@ mod tests {
     #[test]
     fn test_mojibake_repair_version_is_v3() {
         assert_eq!(MOJIBAKE_REPAIR_VERSION, "v3");
+    }
+
+    fn topic_list(name: &str, variants: &[&str]) -> crate::topics::TopicList {
+        crate::topics::TopicList {
+            name: name.into(),
+            variants: variants.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn test_expand_prompt_replaces_known_list() {
+        let lists = vec![topic_list("phong cách", &["Viral"])];
+        let out = expand_prompt("Viết [phong cách] nhé", &lists, 0).unwrap();
+        assert_eq!(out, "Viết Viral nhé");
+    }
+
+    #[test]
+    fn test_expand_prompt_keeps_unknown_placeholder() {
+        let lists = vec![topic_list("phong cách", &["Viral"])];
+        let out = expand_prompt("[không có] [phong cách]", &lists, 0).unwrap();
+        assert_eq!(out, "[không có] Viral");
+    }
+
+    #[test]
+    fn test_expand_prompt_preserves_markdown_link() {
+        let lists = vec![topic_list("phong cách", &["Viral"])];
+        let out = expand_prompt("[text](https://x)", &lists, 0).unwrap();
+        assert_eq!(out, "[text](https://x)");
+    }
+
+    #[test]
+    fn test_expand_prompt_preserves_required_tag() {
+        let lists = vec![topic_list("phong cách", &["Viral"])];
+        let out = expand_prompt("[BẮT BUỘC] giữ", &lists, 0).unwrap();
+        assert_eq!(out, "[BẮT BUỘC] giữ");
+    }
+
+    #[test]
+    fn test_expand_prompt_matches_case_insensitive() {
+        let lists = vec![topic_list("Phong Cách", &["Viral"])];
+        let out = expand_prompt("[phong cách]", &lists, 0).unwrap();
+        assert_eq!(out, "Viral");
+    }
+
+    #[test]
+    fn test_expand_prompt_trims_inner_whitespace() {
+        let lists = vec![topic_list("phong cách", &["Viral"])];
+        let out = expand_prompt("[ phong cách ]", &lists, 0).unwrap();
+        assert_eq!(out, "Viral");
+    }
+
+    #[test]
+    fn test_expand_prompt_empty_variants_keeps_placeholder() {
+        let lists = vec![topic_list("phong cách", &["   "])];
+        let out = expand_prompt("[phong cách]", &lists, 0).unwrap();
+        assert_eq!(out, "[phong cách]");
+    }
+
+    #[test]
+    fn test_expand_prompt_repeated_placeholder_draws_independently() {
+        let lists = vec![topic_list("phong cách", &["A", "B"])];
+        let mut seen_ab = false;
+        let mut seen_ba = false;
+        for seed in 0..256u64 {
+            let out = expand_prompt("[phong cách] [phong cách]", &lists, seed).unwrap();
+            if out == "A B" {
+                seen_ab = true;
+            }
+            if out == "B A" {
+                seen_ba = true;
+            }
+        }
+        assert!(seen_ab, "A B never produced across seeds");
+        assert!(seen_ba, "B A never produced across seeds");
+    }
+
+    #[test]
+    fn test_expand_prompt_deterministic_for_fixed_seed() {
+        let lists = vec![topic_list("phong cách", &["A", "B", "C"])];
+        let a = expand_prompt("[phong cách][phong cách][phong cách]", &lists, 42).unwrap();
+        let b = expand_prompt("[phong cách][phong cách][phong cách]", &lists, 42).unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_expand_prompt_does_not_rescan_replacements() {
+        let lists = vec![topic_list("a", &["[b]"]), topic_list("b", &["X"])];
+        let out = expand_prompt("[a]", &lists, 0).unwrap();
+        assert_eq!(out, "[b]");
+    }
+
+    #[test]
+    fn test_expand_prompt_rejects_oversized_output() {
+        let big = "x".repeat(100);
+        let lists = vec![topic_list("a", &[&big])];
+        let template = "[a]".repeat(200);
+        let err = expand_prompt(&template, &lists, 0).unwrap_err();
+        assert!(err.contains("quá dài"), "got {}", err);
+    }
+
+    #[test]
+    fn test_expand_prompt_no_lists_is_identity() {
+        let template = "abc [phong cách] [khác] 123";
+        assert_eq!(expand_prompt(template, &[], 0).unwrap(), template);
+        assert_eq!(expand_prompt(template, &[], 12345).unwrap(), template);
+    }
+
+    #[test]
+    fn test_expand_prompt_unclosed_bracket_is_literal() {
+        let lists = vec![topic_list("phong cách", &["Viral"])];
+        let out = expand_prompt("abc [phong cách", &lists, 0).unwrap();
+        assert_eq!(out, "abc [phong cách");
+    }
+
+    #[test]
+    fn test_generate_payload_deserializes_topic_lists() {
+        let payload: GeneratePayload = serde_json::from_value(json!({
+            "prompt": "p",
+            "style": "Viral",
+            "topicLists": [{"name": "a", "variants": ["x", "y"]}]
+        }))
+        .unwrap();
+        assert_eq!(payload.topic_lists.len(), 1);
+        assert_eq!(payload.topic_lists[0].name, "a");
+        assert_eq!(
+            payload.topic_lists[0].variants,
+            vec!["x".to_string(), "y".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_generate_payload_without_topic_lists_is_empty() {
+        let payload: GeneratePayload = serde_json::from_value(json!({
+            "prompt": "p",
+            "style": "Viral"
+        }))
+        .unwrap();
+        assert!(payload.topic_lists.is_empty());
+    }
+
+    #[test]
+    fn test_generate_result_serializes_prompt_used_camel_case() {
+        let result = GenerateResult {
+            title: "T".into(),
+            body: "B".into(),
+            prompt: "template [a]".into(),
+            prompt_used: "template X".into(),
+            style: "Viral".into(),
+            is_mock: false,
+        };
+        let value = serde_json::to_value(&result).unwrap();
+        assert_eq!(value["promptUsed"], "template X");
+        assert_eq!(value["prompt"], "template [a]");
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"promptUsed\":"), "got {}", json);
     }
 }

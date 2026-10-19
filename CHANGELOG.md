@@ -2,6 +2,18 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-19 — Chủ đề + random placeholder (backend)
+### Added
+- `src-tauri/src/topics.rs` — store `topics.json` (app_data_dir, atomic tmp+rename) với 4 command `list_topics`/`create_topic`/`update_topic`/`delete_topic` + validate (tên ≤60, template ≤4000, ≤10 danh sách, ≤50 cụm từ/danh sách, cụm từ ≤100 ký tự) + 24 unit test.
+- `src-tauri/src/ai.rs` — `topicLists` (optional) trong `GeneratePayload`; engine `expand_prompt` cú pháp `[tên danh sách]` (SplitMix64, seed tiêm được khi test), cap 12000 ký tự; field `promptUsed` trong `GenerateResult` + 16 test.
+- `src-tauri/src/content.rs` — `ContentItem.topic: Option<String>` (`serde(default)`, không cần migration) + 2 payload + `normalize_topic` + 4 test.
+- `src-tauri/src/lib.rs` — đăng ký 4 command `topics::*`.
+### Changed
+- `generate_content` gọi LLM bằng prompt đã mở rộng; `GenerateResult.prompt` vẫn là template gốc (không đổi semantics).
+### Verified
+- `cargo check --manifest-path src-tauri/Cargo.toml` → `Finished` 0 lỗi.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` → `test result: ok. 187 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out` (baseline 143 + 44).
+
 ## [Unreleased] - 2026-10-19 — Thu gọn khu vực cài đặt style trong trang Tạo nội dung AI
 ### Changed
 - `src/App.jsx` — box cấu hình style luôn-hiện được thay bằng hàng gọn: dropdown Style + nút `Sửa` (icon `Pencil`) + nút `Thêm style` (icon `Plus`) + badge `Mặc định`/`Tùy chỉnh` + đúng 1 dòng preview nội dung (ellipsis); editor chuyển thành modal popup chứa `Tên style`/`Nội dung style` và các nút `Lưu thay đổi`/`Nhân bản`/`Khôi phục mặc định`/`Xóa`/`Đóng`; đóng modal không lưu (không gọi invoke) và re-sync draft. Không đổi payload gửi backend (`styleContent`, `style`/`customStyle: null`), không đổi Rust, E2E vẫn 25 test / 5 file.
