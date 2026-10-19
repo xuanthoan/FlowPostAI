@@ -2,6 +2,21 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-19 — Guard style/publish + counters + panic fix
+### Added
+- `src/App.jsx` — 3 bộ đếm ký tự mới (Nội dung AI, Nội dung style, Nội dung bài đăng, Sửa nội dung kho) dùng `charCount` (code points).
+- `src-tauri/src/ai.rs` — guard `MAX_STYLE_CONTENT_CHARS = 50000` cho style content (code points), trả lỗi tiếng Việt.
+- `src-tauri/src/facebook.rs` — guard `GRAPH_MAX_MESSAGE_CHARS = 63206` cho message publish (code points).
+### Changed
+- `src/App.jsx` — `charCount` (code points) thay `.length` ở các counter; cảnh báo style dài > 12000 ký tự.
+- `src-tauri/src/facebook.rs` — `preview_prefix` thay slice byte để tránh panic multi-byte.
+### Fixed
+- `src-tauri/src/facebook.rs` — panic khi slice byte không đúng ranh giới UTF-8 trong thông báo lỗi.
+### Verified
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` — test result: ok. 196 passed; 0 failed.
+- `cargo build --manifest-path src-tauri/Cargo.toml` — exit 0.
+- `npm run build` — exit 0.
+
 ## [Unreleased] - 2026-10-19 — Bỏ giới hạn 4000 ký tự
 ### Changed
 - `src/App.jsx` — bỏ `maxLength={4000}` ở ô Prompt, Nội dung style và Prompt mẫu; bộ đếm chỉ hiển thị số ký tự đã nhập (dạng `1234 ký tự`), không còn trần `/4000`.

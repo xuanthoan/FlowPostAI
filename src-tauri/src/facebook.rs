@@ -1,6 +1,15 @@
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Runtime};
 
+/// Facebook composers stop accepting input at this many characters. Meta does
+/// NOT document a limit for `message`: the Graph reference documents no maximum
+/// and describes a photo caption only as a UTF-8 string. This value is the
+/// observed ceiling enforced by the Facebook composer, kept here as a named,
+/// configurable guard. The Graph API answers with an invalid-parameter error
+/// instead of truncating, so we block before sending rather than let the post
+/// fail after the upload.
+const GRAPH_MAX_MESSAGE_CHARS: usize = 63_206;
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct MeResponse {
     pub id: String,
@@ -86,7 +95,7 @@ pub async fn validate_facebook_token(token: String) -> Result<MeResponse, String
     let body = resp.text().await.map_err(|e| e.to_string())?;
 
     if status >= 200 && status < 300 {
-        parse_me_response(&body).map_err(|e| format!("Phản hồi không hợp lệ: {} | body: {}", e, &body[..body.len().min(200)]))
+        parse_me_response(&body).map_err(|e| format!("Phản hồi không hợp lệ: {} | body: {}", e, preview_prefix(&body, 200)))
     } else {
         Err(map_graph_error(status, &body))
     }
@@ -162,6 +171,22 @@ pub async fn list_facebook_pages<R: Runtime>(app: AppHandle<R>, token: String) -
     }
 }
 
+fn preview_prefix(s: &str, max_chars: usize) -> String {
+    s.chars().take(max_chars).collect()
+}
+
+fn validate_message_length(message: &str) -> Result<(), String> {
+    let count = message.chars().count();
+    if count > GRAPH_MAX_MESSAGE_CHARS {
+        Err(format!(
+            "Nội dung quá dài: {} ký tự, vượt giới hạn {} ký tự của Facebook. Vui lòng rút ngắn bài đăng.",
+            count, GRAPH_MAX_MESSAGE_CHARS
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 #[tauri::command]
 pub async fn publish_content<R: Runtime>(
     app: AppHandle<R>,
@@ -175,6 +200,9 @@ pub async fn publish_content<R: Runtime>(
     if message.trim().is_empty() {
         return Err("Vui lòng nhập nội dung".into());
     }
+    // Validate length before resolving token / any network call, so a too-long
+    // post fails fast. The cfg!(test) mock below also enforces this.
+    validate_message_length(&message)?;
     // Resolve token: ưu tiên Page token đã cache, fallback User token
     let access_token = crate::security::get_secret_hybrid(Some(&app), &page_token_key(&page_id))
         .ok()
@@ -423,6 +451,37 @@ mod tests {
     fn test_page_token_key_format() {
         assert_eq!(page_token_key("123"), "fb_page_123");
         assert_eq!(page_token_key("abc"), "fb_page_abc");
+    }
+
+    #[test]
+    fn test_validate_message_length_accepts_at_limit() {
+        let s = "a".repeat(63_206);
+        assert!(validate_message_length(&s).is_ok());
+    }
+
+    #[test]
+    fn test_validate_message_length_rejects_over_limit() {
+        let s = "a".repeat(63_207);
+        let err = validate_message_length(&s).unwrap_err();
+        assert!(err.contains("63207"));
+        assert!(err.contains("63206"));
+    }
+
+    #[test]
+    fn test_validate_message_length_counts_code_points() {
+        let s = "ế".repeat(63_206);
+        assert!(validate_message_length(&s).is_ok());
+    }
+
+    #[test]
+    fn test_preview_prefix_handles_multibyte() {
+        let s = "ế".repeat(300);
+        let out = preview_prefix(&s, 200);
+        assert!(out.chars().count() <= 200);
+        // no panic already implied by reaching here
+        let ascii = "a".repeat(300);
+        assert_eq!(preview_prefix(&ascii, 200).chars().count(), 200);
+        assert_eq!(preview_prefix("abcdefghij", 200), "abcdefghij");
     }
 
     #[tokio::test]

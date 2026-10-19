@@ -8,6 +8,12 @@ const AI_TIMEOUT_SECS: u64 = 120;
 
 const MAX_EXPANDED_PROMPT_CHARS: usize = 12_000;
 
+/// Guard for the style content that is spliced into the system message on
+/// EVERY AI request. `build_system_message` (below) trims it before inlining,
+/// so the count here is on the trimmed value, in Unicode code points. This is a
+/// pathological-input guard, not a product limit.
+const MAX_STYLE_CONTENT_CHARS: usize = 50_000;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GeneratePayload {
@@ -479,6 +485,15 @@ fn ensure_body_present(body: &str) -> Result<(), String> {
     }
 }
 
+fn ensure_style_content_size(style_content: Option<&str>) -> Result<(), String> {
+    let count = style_content.map(str::trim).unwrap_or("").chars().count();
+    if count > MAX_STYLE_CONTENT_CHARS {
+        Err("Nội dung style quá dài (tối đa 50000 ký tự). Vui lòng rút gọn style để tránh vượt giới hạn ngữ cảnh của model.".into())
+    } else {
+        Ok(())
+    }
+}
+
 fn build_chat_request<'a>(
     model: &'a str,
     system_msg: &'a str,
@@ -709,6 +724,7 @@ pub async fn generate_content<R: Runtime>(app: AppHandle<R>, payload: GeneratePa
     if payload.style.trim().is_empty() {
         return Err("Vui lòng chọn style".into());
     }
+    ensure_style_content_size(payload.style_content.as_deref())?;
 
     let prompt_used = expand_prompt(&payload.prompt, &payload.topic_lists, prompt_seed())?;
     let raw = call_ai_provider(&app, &prompt_used, &payload.style, payload.custom_style.as_deref(), payload.style_content.as_deref()).await?;
@@ -1564,5 +1580,44 @@ mod tests {
         assert_eq!(value["prompt"], "template [a]");
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"promptUsed\":"), "got {}", json);
+    }
+
+    #[test]
+    fn test_ensure_style_content_size_allows_none_and_blank() {
+        assert!(ensure_style_content_size(None).is_ok());
+        assert!(ensure_style_content_size(Some("")).is_ok());
+        assert!(ensure_style_content_size(Some("   \n ")).is_ok());
+    }
+
+    #[test]
+    fn test_ensure_style_content_size_accepts_at_limit() {
+        let s = "a".repeat(MAX_STYLE_CONTENT_CHARS);
+        assert!(ensure_style_content_size(Some(&s)).is_ok());
+    }
+
+    #[test]
+    fn test_ensure_style_content_size_rejects_over_limit() {
+        let s = "a".repeat(MAX_STYLE_CONTENT_CHARS + 1);
+        assert_eq!(
+            ensure_style_content_size(Some(&s)),
+            Err("Nội dung style quá dài (tối đa 50000 ký tự). Vui lòng rút gọn style để tránh vượt giới hạn ngữ cảnh của model.".into())
+        );
+    }
+
+    #[test]
+    fn test_ensure_style_content_size_ignores_surrounding_whitespace() {
+        let s = format!("   {}   \n", "a".repeat(MAX_STYLE_CONTENT_CHARS));
+        assert!(ensure_style_content_size(Some(&s)).is_ok());
+    }
+
+    #[test]
+    fn test_ensure_style_content_size_counts_code_points_not_units() {
+        // Non-BMP emoji: 4 bytes / 2 UTF-16 units per code point. An implementation
+        // using str::len() (bytes) or encode_utf16().count() (UTF-16 units) would
+        // reject this string even though its code-point count is exactly the limit.
+        let at_limit = "😀".repeat(MAX_STYLE_CONTENT_CHARS);
+        assert!(ensure_style_content_size(Some(&at_limit)).is_ok());
+        let over = "😀".repeat(MAX_STYLE_CONTENT_CHARS + 1);
+        assert!(ensure_style_content_size(Some(&over)).is_err());
     }
 }

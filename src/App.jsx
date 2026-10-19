@@ -38,6 +38,11 @@ function formatBytes(bytes) {
   return `${(bytes / 1024 ** index).toFixed(index ? 1 : 0)} ${units[index]}`
 }
 
+// Unicode code points, so the count matches Rust's chars().count().
+// JS String.length counts UTF-16 units and would differ for astral emoji.
+const charCount = (s) => [...(s || '')].length
+const STYLE_WARN_CHARS = 12000
+
 function MediaLibrary() {
   const [items, setItems] = useState([])
   const [busy, setBusy] = useState(false)
@@ -345,8 +350,8 @@ function SettingsPage() {
       <button className={subTab==='Providers'?'primary':'outline'} onClick={()=>{ setSubTab('Providers'); setErr(''); setMsg('') }} style={{height:32}}><WandSparkles size={14}/> Providers</button>
     </div>
     {subTab==='Kết nối' ? <div className="panel" style={{padding:20, display:'flex', flexDirection:'column', gap:18}}>
-      {err && <div className="error-box">{err}</div>}
-      {msg && <div className="desktop-notice" style={{background:'#eef7ee', borderColor:'#cde9cd', color:'#2e6b2e'}}><CircleCheck size={18}/><span>{msg}</span></div>}
+{err && <div className="error-box">{err}</div>}
+    {msg && <div className="desktop-notice" style={{background:'#eef7ee', borderColor:'#cde9cd', color:'#2e6b2e'}}><CircleCheck size={18}/><span>{msg}</span></div>}
       <div>
         <h2 style={{fontSize:15, margin:'0 0 8px'}}>Facebook Token</h2>
         <p style={{fontSize:13, color:'#777', margin:'0 0 10px'}}>Dùng cho Graph API đăng bài. Token được mã hóa trong OS vault. Frontend chỉ biết trạng thái <b>{status.hasFacebookToken ? '●●●● đã lưu' : 'chưa lưu'}</b>.</p>
@@ -428,6 +433,7 @@ function AiContentPage() {
   const [topicBusy, setTopicBusy] = useState(false)
   const [topicModalOpen, setTopicModalOpen] = useState(false)
   const [promptUsed, setPromptUsed] = useState('')
+  const [styleWarn, setStyleWarn] = useState('')
 
   const loadMediaOptions = async () => {
     if (!desktop) return
@@ -640,9 +646,15 @@ function AiContentPage() {
     } catch (e) { setErr(String(e)) } finally { setTopicBusy(false) }
   }
 
-  const generate = async () => {
+  const generate = async (force = false) => {
     if (!prompt.trim()) { setErr('Vui lòng nhập prompt'); return }
     if (!styleDraft.content.trim()) { setErr('Nội dung style không được để trống'); return }
+    const styleLen = charCount(styleDraft.content)
+    if (!force && styleLen > STYLE_WARN_CHARS) {
+      setStyleWarn(`Nội dung style dài ${styleLen} ký tự. Style này được gửi kèm mọi yêu cầu AI nên có thể tốn token và chậm hơn.`)
+      return
+    }
+    setStyleWarn('')
     setBusy(true); setErr(''); setMsg(''); setPromptUsed('')
     try {
       const topicLists = (topics.find(t => t.id === selectedTopicId)?.lists) || []
@@ -671,6 +683,13 @@ function AiContentPage() {
     <div className="page-heading"><div><p>AI CONTENT</p><h1>Tạo nội dung với AI</h1><span>Nhập prompt, chọn style, tạo nội dung với AI provider đã cấu hình.</span></div></div>
     {!desktop && <div className="desktop-notice"><HardDrive size={23}/><div><strong>Hãy mở bằng ứng dụng FlowPost AI Desktop</strong><span>Chức năng AI chỉ hoạt động trong bản Tauri.</span></div></div>}
     {err && <div className="error-box">{err}</div>}
+    {styleWarn && <div className="error-box" style={{background:'#fff3cd', borderColor:'#ffc107', color:'#664d03'}}>
+      <span>{styleWarn}</span>
+      <div style={{display:'flex', gap:8, marginTop:8}}>
+        <button className="btn btn-ghost" onClick={() => setStyleWarn('')}>Hủy</button>
+        <button className="btn btn-primary" onClick={() => generate(true)}>Vẫn tạo</button>
+      </div>
+    </div>}
     {msg && <div className="desktop-notice" style={{background:'#eef7ee', borderColor:'#cde9cd', color:'#2e6b2e'}}><CircleCheck size={18}/><span>{msg}</span></div>}
     <div className="panel" style={{padding:20, display:'flex', flexDirection:'column', gap:16}}>
       <div>
@@ -703,7 +722,7 @@ function AiContentPage() {
           {!desktop && <div style={{fontSize:12, color:'#999', marginTop:4}}>Mở app desktop để tải style</div>}
         </div>
         <div style={{display:'flex', alignItems:'flex-end'}}>
-          <button className="primary" onClick={generate} disabled={!desktop || busy || !prompt.trim()} style={{width:'100%', height:36, justifyContent:'center'}}><Sparkles size={16}/> {busy ? 'Đang tạo...' : 'Tạo nội dung'}</button>
+          <button className="primary" onClick={() => generate()} disabled={!desktop || busy || !prompt.trim()} style={{width:'100%', height:36, justifyContent:'center'}}><Sparkles size={16}/> {busy ? 'Đang tạo...' : 'Tạo nội dung'}</button>
         </div>
       </div>
       <div style={{border:'1px solid #e8e8ed', borderRadius:10, padding:12, display:'flex', flexDirection:'column', gap:4, background:'#fafaff'}}>
@@ -727,6 +746,7 @@ function AiContentPage() {
       <div>
         <label style={{fontSize:14, fontWeight:700}}>Nội dung</label>
         <textarea spellCheck={false} placeholder="Nội dung sẽ hiện sau khi Tạo — bạn có thể chỉnh sửa..." value={body} onChange={e=>setBody(e.target.value)} disabled={busy} style={{width:'100%', minHeight:160, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical'}}/>
+        <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{charCount(body)} ký tự</div>
       </div>
       <div>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
@@ -737,7 +757,7 @@ function AiContentPage() {
         {mediaIds.length>0 && <div style={{fontSize:13, color:'#6558d6', marginTop:6}}>Đã chọn {mediaIds.length} media</div>}
       </div>
       <div style={{display:'flex', gap:8, justifyContent:'flex-end'}}>
-        <button className="outline" onClick={()=>{setPrompt(''); setTitle(''); setBody(''); setMediaIds([]); setFreePrompt(''); setSelectedTopicId(''); setPromptUsed(''); setMsg(''); setErr('')}} disabled={busy} style={{height:36}}>Xóa form</button>
+        <button className="outline" onClick={()=>{setPrompt(''); setTitle(''); setBody(''); setMediaIds([]); setFreePrompt(''); setSelectedTopicId(''); setPromptUsed(''); setMsg(''); setErr(''); setStyleWarn('')}} disabled={busy} style={{height:36}}>Xóa form</button>
         <button className="primary" onClick={save} disabled={!desktop || busy} style={{height:36}}><FileText size={16}/> Lưu vào kho</button>
       </div>
     </div>
@@ -758,7 +778,8 @@ function AiContentPage() {
           <div>
             <label style={{fontSize:13, fontWeight:600}}>Nội dung style</label>
             <textarea spellCheck={false} value={styleDraft.content} onChange={e=>setStyleDraft(d=>({...d, content:e.target.value}))} rows={12} disabled={busy || styleBusy} placeholder="Mô tả đầy đủ giọng văn và cấu trúc bài viết cho style này..." style={{width:'100%', minHeight:140, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical', fontFamily:'inherit'}}/>
-            <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{styleDraft.content.length} ký tự</div>
+            <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{charCount(styleDraft.content)} ký tự</div>
+            {charCount(styleDraft.content) > STYLE_WARN_CHARS && <div className="error-box" style={{background:'#fff3cd', borderColor:'#ffc107', color:'#664d03'}}>Nội dung style đang dài ({charCount(styleDraft.content)} ký tự). Style được gửi kèm mọi yêu cầu AI nên có thể làm tăng chi phí và độ trễ.</div>}
           </div>
           {err && <div className="error-box">{err}</div>}
           {msg && <div className="desktop-notice" style={{background:'#eef7ee', borderColor:'#cde9cd', color:'#2e6b2e'}}><CircleCheck size={18}/><span>{msg}</span></div>}
@@ -966,6 +987,7 @@ function PublishModal({ onClose, onSuccess }) {
           {pages.map(p => <option key={p.id} value={p.id}>{p.name} ({p.id})</option>)}
         </select>
         <textarea spellCheck={false} value={message} onChange={e=>setMessage(e.target.value)} placeholder="Nội dung bài đăng..." disabled={busy} style={{width:'100%', minHeight:100, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:8, fontSize:14, resize:'vertical'}} />
+        <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{charCount(message)} ký tự</div>
         <div>
           <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:4}}>
             <label style={{fontSize:13, fontWeight:700}}>Ảnh đính kèm (tùy chọn, 1 ảnh đầu)</label>
@@ -1071,6 +1093,7 @@ function ContentWarehousePage() {
         <div style={{display:'flex', flexDirection:'column', gap:10, marginTop:14}}>
           <input spellCheck={false} value={editing.title} onChange={e=>setEditing({...editing, title:e.target.value})} placeholder="Tiêu đề" style={{padding:'8px 10px', border:'1px solid #e2e1e7', borderRadius:8, fontSize:14}}/>
           <textarea spellCheck={false} value={editing.body} onChange={e=>setEditing({...editing, body:e.target.value})} placeholder="Nội dung" rows={5} style={{padding:'8px 10px', border:'1px solid #e2e1e7', borderRadius:8, fontSize:14, resize:'vertical'}}/>
+          <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{charCount(editing.body)} ký tự</div>
           <input spellCheck={false} value={editing.prompt} onChange={e=>setEditing({...editing, prompt:e.target.value})} placeholder="Prompt" style={{padding:'8px 10px', border:'1px solid #e2e1e7', borderRadius:8, fontSize:14}}/>
           <div style={{display:'flex', gap:8, justifyContent:'flex-end', marginTop:10}}>
             <button className="outline" onClick={()=>setEditing(null)} style={{height:34}}>Hủy</button>
