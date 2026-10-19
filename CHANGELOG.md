@@ -4,7 +4,7 @@ Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở �
 
 ## [Unreleased] - 2026-10-19 — Style có nội dung chỉnh sửa được + lưu style tùy chỉnh
 ### Added
-- `src-tauri/src/styles.rs` — store `styles.json` trong app_data_dir: CRUD (thêm/sửa/nhân bản/xóa/khôi phục mặc định), seed 3 built-in cố định `viral`/`motivational`/`story`, tự chữa lành (self-heal: dedupe id, seed lại built-in bị xóa, đặt lại entry mặc định bị rỗng), 20 unit test.
+- `src-tauri/src/styles.rs` — store `styles.json` trong app_data_dir: CRUD (thêm/sửa/nhân bản/xóa/khôi phục mặc định), seed 3 built-in cố định `viral`/`motivational`/`story`, tự chữa lành (self-heal: dedupe id, seed lại built-in bị xóa, đặt lại entry mặc định bị rỗng), 21 unit test (gồm test chống mojibake).
 - `src-tauri/src/lib.rs` — đăng ký 6 command `styles::list_styles`, `styles::create_style`, `styles::update_style`, `styles::duplicate_style`, `styles::delete_style`, `styles::reset_style`.
 - `e2e/styles.spec.ts` — 6 test E2E (mock stateful) cho `list_styles`/`create_style`/`update_style`/`duplicate_style`/`delete_style`/`reset_style`.
 ### Changed
