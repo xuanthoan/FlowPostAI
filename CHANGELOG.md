@@ -8,7 +8,7 @@ Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở �
 ### Changed
 - `SECURITY.md` — mục "Lịch sử key" phản ánh đúng trạng thái đã kiểm chứng: `git filter-repo` đã chạy, commit gốc chứa key (`8bd6850`) và các hash trước rewrite không còn tồn tại cục bộ, bản viết lại (`c0adfcb`) đã publish lên `origin/dev`; `.env` không được track.
 ### Verified
-- `git log --all --name-only -S"sk-"` → chỉ khớp placeholder `sk-REPLACE_WITH_YOUR_KEY` trong `SECURITY.md`/`e2e/README.md`/`e2e/.env.example`/`e2e/helpers/provider.ts`/`e2e/providers.spec.ts`; không còn `sk-*` key thật trong ref reachable.
+- `git log --all --name-only -S"sk-"` → chỉ khớp: placeholder `sk-REPLACE_WITH_YOUR_KEY` (`SECURITY.md`, `CHANGELOG.md`, `e2e/README.md`, `e2e/.env.example`, `e2e/helpers/provider.ts`) và các chuỗi rút gọn dạng `sk-...` trong test (`e2e/providers.spec.ts`); không có `sk-*` key thật trong ref reachable.
 - `git rev-parse 8bd6850` → `fatal: ambiguous argument '8bd6850': unknown revision or path not in the working tree` (commit gốc không còn tồn tại cục bộ).
 - `git log --oneline origin/dev..c0adfcb` → rỗng (bản rewrite đã lên `origin/dev`).
 - `git ls-files --error-unmatch e2e/.env` → `error: pathspec 'e2e/.env' did not match any file(s) known to git`; `git log --all --name-only -- e2e/.env` → rỗng.
@@ -16,6 +16,7 @@ Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở �
 ### Notes
 - Entry lịch sử `[370d1bb]` (2026-09-05) giữ nguyên; câu "cần filter-repo riêng" trong đó đã lỗi thời và được entry này supersede.
 - CHƯA xác minh: trạng thái key trong `e2e/.env` trên đĩa (không đọc giá trị); việc GitHub còn phục vụ blob cũ theo SHA hay không (cần network/owner); số object unreachable (`git fsck` bị chặn trong sandbox).
+- Còn một **đoạn tiền tố key đã bị cắt** (dạng `sk-xxxx…`, không đủ để sử dụng) trong blob lịch sử của `e2e/providers.spec.ts` ở các commit `c0adfcb` và `462e2af`; đây không phải credential dùng được, nhưng KHÔNG thể xoá nếu không viết lại lịch sử lần nữa (cần quyết định riêng của chủ dự án).
 
 ## [Unreleased] - 2026-10-19 — Style có nội dung chỉnh sửa được + lưu style tùy chỉnh
 ### Added
