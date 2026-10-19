@@ -466,7 +466,7 @@ fn log_mojibake_preview(s: &str) {
 }
 
 const AI_MAX_TOKENS_CAP: u32 = 8192;
-const DEFAULT_MAX_TOKENS: u32 = 2048;
+const DEFAULT_MAX_TOKENS: u32 = 4096;
 
 pub(crate) const EMPTY_BODY_ERROR: &str =
     "AI không trả về nội dung (có thể bị cắt do giới hạn token). Vui lòng thử lại hoặc đổi model/provider.";
@@ -919,8 +919,8 @@ mod tests {
     }
 
     #[test]
-    fn test_default_max_tokens_is_2048() {
-        assert_eq!(DEFAULT_MAX_TOKENS, 2048);
+    fn test_default_max_tokens_is_4096() {
+        assert_eq!(DEFAULT_MAX_TOKENS, 4096);
     }
 
     #[test]
@@ -1072,7 +1072,7 @@ mod tests {
         let client = reqwest::Client::builder().http1_only().build().unwrap();
         let url = format!("{}/v1/chat/completions", mock_server.uri());
         let raw =
-            complete_with_retry(&client, &url, "test_key_123", "m", "sys", "user", 2048, false)
+            complete_with_retry(&client, &url, "test_key_123", "m", "sys", "user", DEFAULT_MAX_TOKENS, false)
                 .await
                 .unwrap();
         assert_eq!(raw.content, "TIÊU ĐỀ\n\n\nThân bài đầy đủ");
@@ -1082,8 +1082,8 @@ mod tests {
         assert_eq!(requests.len(), 2, "expected exactly 2 POSTs");
         let first: Value = requests[0].body_json().unwrap();
         let second: Value = requests[1].body_json().unwrap();
-        assert_eq!(first["max_tokens"], 2048);
-        assert_eq!(second["max_tokens"], 4096);
+        assert_eq!(first["max_tokens"], 4096);
+        assert_eq!(second["max_tokens"], 8192);
     }
 
     #[tokio::test]

@@ -27,7 +27,6 @@ struct TopicsFile {
 }
 
 pub const MAX_TOPIC_NAME_CHARS: usize = 60;
-pub const MAX_TEMPLATE_CHARS: usize = 4000;
 pub const MAX_LIST_NAME_CHARS: usize = 60;
 pub const MAX_LISTS_PER_TOPIC: usize = 10;
 pub const MAX_VARIANTS_PER_LIST: usize = 50;
@@ -108,9 +107,6 @@ fn validate_template(template: &str) -> Result<(), String> {
     let trimmed = template.trim();
     if trimmed.is_empty() {
         return Err("Prompt mẫu không được để trống".into());
-    }
-    if trimmed.chars().count() > MAX_TEMPLATE_CHARS {
-        return Err("Prompt mẫu tối đa 4000 ký tự".into());
     }
     Ok(())
 }
@@ -380,10 +376,13 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_template_too_long() {
-        let err = validate_template(&"a".repeat(4001)).unwrap_err();
-        assert_eq!(err, "Prompt mẫu tối đa 4000 ký tự");
-        assert!(validate_template(&"a".repeat(4000)).is_ok());
+    fn test_validate_template_accepts_long_input() {
+        let long = "a".repeat(20_000);
+        assert!(validate_template(&long).is_ok());
+        let mut file = TopicsFile { topics: vec![] };
+        let created = create_topic_in(&mut file, &input("Chủ đề dài", &long, vec![])).unwrap();
+        assert_eq!(created.template.chars().count(), 20_000);
+        assert_eq!(file.topics[0].template.chars().count(), 20_000);
     }
 
     #[test]

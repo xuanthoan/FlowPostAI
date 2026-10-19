@@ -142,9 +142,6 @@ fn validate_content(content: &str) -> Result<(), String> {
     if trimmed.is_empty() {
         return Err("Nội dung style không được để trống".into());
     }
-    if trimmed.chars().count() > 4000 {
-        return Err("Nội dung style tối đa 4000 ký tự".into());
-    }
     Ok(())
 }
 
@@ -488,10 +485,13 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_content_too_long() {
-        let err = validate_content(&"a".repeat(4001)).unwrap_err();
-        assert_eq!(err, "Nội dung style tối đa 4000 ký tự");
-        assert!(validate_content(&"a".repeat(4000)).is_ok());
+    fn test_validate_content_accepts_long_input() {
+        let long = "a".repeat(20_000);
+        assert!(validate_content(&long).is_ok());
+        let mut file = default_styles();
+        let style = create_style_in(&mut file, "Style dài", &long).unwrap();
+        assert_eq!(style.content.chars().count(), 20_000);
+        assert_eq!(file.styles.last().unwrap().content.chars().count(), 20_000);
     }
 
     #[test]

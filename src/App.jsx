@@ -690,8 +690,8 @@ function AiContentPage() {
       </div>
       <div>
         <label style={{fontSize:14, fontWeight:700}}>Prompt *</label>
-        <textarea spellCheck={false} placeholder="VD: Bí quyết năng lượng buổi sáng cho dân văn phòng..." value={prompt} onChange={e=>setPrompt(e.target.value)} maxLength={4000} disabled={!desktop || busy} style={{width:'100%', minHeight:90, border:'1px solid #e2e1e7', borderRadius:8, padding:12, fontSize:14, marginTop:6, resize:'vertical'}}/>
-        <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{prompt.length}/4000</div>
+        <textarea spellCheck={false} placeholder="VD: Bí quyết năng lượng buổi sáng cho dân văn phòng..." value={prompt} onChange={e=>setPrompt(e.target.value)} disabled={!desktop || busy} style={{width:'100%', minHeight:90, border:'1px solid #e2e1e7', borderRadius:8, padding:12, fontSize:14, marginTop:6, resize:'vertical'}}/>
+        <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{prompt.length} ký tự</div>
         {promptUsed && promptUsed !== prompt && <div style={{fontSize:12, color:'#999', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}>Đã dùng: {promptUsed}</div>}
       </div>
       <div style={{display:'grid', gridTemplateColumns:'1fr 160px', gap:12}}>
@@ -757,8 +757,8 @@ function AiContentPage() {
           </div>
           <div>
             <label style={{fontSize:13, fontWeight:600}}>Nội dung style</label>
-            <textarea spellCheck={false} value={styleDraft.content} onChange={e=>setStyleDraft(d=>({...d, content:e.target.value}))} rows={12} maxLength={4000} disabled={busy || styleBusy} placeholder="Mô tả đầy đủ giọng văn và cấu trúc bài viết cho style này..." style={{width:'100%', minHeight:140, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical', fontFamily:'inherit'}}/>
-            <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{styleDraft.content.length}/4000</div>
+            <textarea spellCheck={false} value={styleDraft.content} onChange={e=>setStyleDraft(d=>({...d, content:e.target.value}))} rows={12} disabled={busy || styleBusy} placeholder="Mô tả đầy đủ giọng văn và cấu trúc bài viết cho style này..." style={{width:'100%', minHeight:140, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical', fontFamily:'inherit'}}/>
+            <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{styleDraft.content.length} ký tự</div>
           </div>
           {err && <div className="error-box">{err}</div>}
           {msg && <div className="desktop-notice" style={{background:'#eef7ee', borderColor:'#cde9cd', color:'#2e6b2e'}}><CircleCheck size={18}/><span>{msg}</span></div>}
@@ -785,8 +785,8 @@ function AiContentPage() {
           </div>
           <div>
             <label style={{fontSize:13, fontWeight:600}}>Prompt mẫu</label>
-            <textarea spellCheck={false} value={topicDraft.template} onChange={e=>setTopicDraft(d=>({...d, template:e.target.value}))} rows={8} maxLength={4000} disabled={busy || topicBusy} placeholder="VD: viết 1 đoạn văn theo phong cách [phong cách] về chủ đề Nhân quả trong phật giáo" style={{width:'100%', minHeight:120, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical', fontFamily:'inherit'}}/>
-            <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{topicDraft.template.length}/4000</div>
+            <textarea spellCheck={false} value={topicDraft.template} onChange={e=>setTopicDraft(d=>({...d, template:e.target.value}))} rows={8} disabled={busy || topicBusy} placeholder="VD: viết 1 đoạn văn theo phong cách [phong cách] về chủ đề Nhân quả trong phật giáo" style={{width:'100%', minHeight:120, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical', fontFamily:'inherit'}}/>
+            <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{topicDraft.template.length} ký tự</div>
           </div>
           <div>
             <label style={{fontSize:13, fontWeight:600}}>Danh sách từ/cụm từ</label>

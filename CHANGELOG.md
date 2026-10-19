@@ -2,6 +2,17 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-19 — Bỏ giới hạn 4000 ký tự
+### Changed
+- `src/App.jsx` — bỏ `maxLength={4000}` ở ô Prompt, Nội dung style và Prompt mẫu; bộ đếm chỉ hiển thị số ký tự đã nhập (dạng `1234 ký tự`), không còn trần `/4000`.
+- `src-tauri/src/ai.rs` — `DEFAULT_MAX_TOKENS` 2048 → 4096 (giữ `AI_MAX_TOKENS_CAP = 8192`); lần thử lại phát 8192 token.
+### Removed
+- `src-tauri/src/topics.rs` — bỏ `MAX_TEMPLATE_CHARS` và lỗi `Prompt mẫu tối đa 4000 ký tự`.
+- `src-tauri/src/styles.rs` — bỏ trần 4000 ký tự của nội dung style và lỗi `Nội dung style tối đa 4000 ký tự`.
+### Verified
+- `npm run build` — `✓ built in 5.42s`, exit 0.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib` — `test result: ok. 187 passed; 0 failed`.
+
 ## [Unreleased] - 2026-10-19 — Tắt kiểm tra chính tả ở mọi ô nội dung
 ### Changed
 - `index.html` — thêm `spellcheck="false"` trên thẻ `<html>` để mọi ô nhập kế thừa.
