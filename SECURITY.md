@@ -28,7 +28,8 @@ Nếu bạn phát hiện lỗ hổng bảo mật, vui lòng **không** tạo iss
 
 ## Lịch sử key
 
-- **P0 audit (tháng 9/2026):** Đã xác minh lịch sử git sạch. Không còn `sk-*` key thật nào trong toàn bộ lịch sử commit — chỉ còn placeholder `sk-REPLACE_WITH_YOUR_KEY`. Working tree cũng sạch (`.env` chưa tồn tại).
+- **P0 audit (tháng 9/2026) + remediation (2026-10-19):** Lịch sử git đã được viết lại bằng `git filter-repo`. Commit gốc chứa key không còn tồn tại trong repo, và quét mọi ref reachable (`git log --all -S"sk-"`) không còn `sk-*` key thật — chỉ còn placeholder `sk-REPLACE_WITH_YOUR_KEY` trong code và tài liệu.
+- **Lưu ý `.env`:** `.env` không được track; chỉ `e2e/.gitignore` bỏ qua `.env` (`.gitignore` gốc thì không). Nếu máy developer có `e2e/.env` cục bộ thì file đó không nằm trong lịch sử git; mỗi người tự quản lý và luân chuyển secret cục bộ.
 - Khuyến nghị tiếp tục dùng biến môi trường cho mọi secret như best practice, không commit `.env` hay API key trực tiếp.
 
 ## Khuyến nghị vận hành

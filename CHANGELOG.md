@@ -2,6 +2,21 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-19 — Xác minh & hiệu chỉnh tài liệu bảo mật API key
+### Fixed
+- `SECURITY.md` — sửa khẳng định sai ở mục "Lịch sử key": câu "Working tree cũng sạch (`.env` chưa tồn tại)" không đúng, vì `e2e/.env` tồn tại trên đĩa (untracked, bị `e2e/.gitignore` bỏ qua).
+### Changed
+- `SECURITY.md` — mục "Lịch sử key" phản ánh đúng trạng thái đã kiểm chứng: `git filter-repo` đã chạy, commit gốc chứa key (`8bd6850`) và các hash trước rewrite không còn tồn tại cục bộ, bản viết lại (`c0adfcb`) đã publish lên `origin/dev`; `.env` không được track.
+### Verified
+- `git log --all --name-only -S"sk-"` → chỉ khớp placeholder `sk-REPLACE_WITH_YOUR_KEY` trong `SECURITY.md`/`e2e/README.md`/`e2e/.env.example`/`e2e/helpers/provider.ts`/`e2e/providers.spec.ts`; không còn `sk-*` key thật trong ref reachable.
+- `git rev-parse 8bd6850` → `fatal: ambiguous argument '8bd6850': unknown revision or path not in the working tree` (commit gốc không còn tồn tại cục bộ).
+- `git log --oneline origin/dev..c0adfcb` → rỗng (bản rewrite đã lên `origin/dev`).
+- `git ls-files --error-unmatch e2e/.env` → `error: pathspec 'e2e/.env' did not match any file(s) known to git`; `git log --all --name-only -- e2e/.env` → rỗng.
+- `git status --porcelain --ignored -- e2e/` → `!! e2e/.env` (được ignore, không tracked).
+### Notes
+- Entry lịch sử `[370d1bb]` (2026-09-05) giữ nguyên; câu "cần filter-repo riêng" trong đó đã lỗi thời và được entry này supersede.
+- CHƯA xác minh: trạng thái key trong `e2e/.env` trên đĩa (không đọc giá trị); việc GitHub còn phục vụ blob cũ theo SHA hay không (cần network/owner); số object unreachable (`git fsck` bị chặn trong sandbox).
+
 ## [Unreleased] - 2026-10-19 — Style có nội dung chỉnh sửa được + lưu style tùy chỉnh
 ### Added
 - `src-tauri/src/styles.rs` — store `styles.json` trong app_data_dir: CRUD (thêm/sửa/nhân bản/xóa/khôi phục mặc định), seed 3 built-in cố định `viral`/`motivational`/`story`, tự chữa lành (self-heal: dedupe id, seed lại built-in bị xóa, đặt lại entry mặc định bị rỗng), 21 unit test (gồm test chống mojibake).
