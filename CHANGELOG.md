@@ -2,6 +2,17 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-19 — Chủ đề + random placeholder (frontend)
+### Added
+- `src/App.jsx` — mục `Chủ đề` phía trên ô Prompt: select `Tự do`/chủ đề + `Sửa`/`Thêm chủ đề` + preview 1 dòng; modal chủ đề (tên ≤60, prompt mẫu ≤4000, editor danh sách "mỗi dòng 1 cụm từ"); dòng `Đã dùng:` hiển thị biến thể do Rust mở rộng.
+- `e2e/topics.spec.ts` — 6 test cho `list_topics`/`create_topic`/`update_topic`/`delete_topic` qua mock.
+### Changed
+- `src/App.jsx` — ô Prompt 500 → 4000 ký tự; `generate_content` gửi thêm `topicLists`; `save_content` gửi thêm `topic` (tên chủ đề hoặc null); Kho nội dung tìm kiếm/hiển thị chủ đề và `update_content` truyền `topic` (tránh xoá chủ đề khi sửa bài).
+### Verified
+- `npm run lint` → `eslint .` chạy sạch, exit 0.
+- `npm run build` → `✓ built in 10.08s`, exit 0.
+- `E2E_MOCK=true npx playwright test --list` → `Total: 31 tests in 6 files`.
+
 ## [Unreleased] - 2026-10-19 — Chủ đề + random placeholder (backend)
 ### Added
 - `src-tauri/src/topics.rs` — store `topics.json` (app_data_dir, atomic tmp+rename) với 4 command `list_topics`/`create_topic`/`update_topic`/`delete_topic` + validate (tên ≤60, template ≤4000, ≤10 danh sách, ≤50 cụm từ/danh sách, cụm từ ≤100 ký tự) + 24 unit test.

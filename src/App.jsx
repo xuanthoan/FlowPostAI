@@ -420,6 +420,14 @@ function AiContentPage() {
   const [mediaIds, setMediaIds] = useState([])
   const [mediaOptions, setMediaOptions] = useState([])
   const [showPicker, setShowPicker] = useState(false)
+  const [topics, setTopics] = useState([])
+  const [selectedTopicId, setSelectedTopicId] = useState('')
+  const [freePrompt, setFreePrompt] = useState('')
+  const [topicDraft, setTopicDraft] = useState({ id: '', name: '', template: '', lists: [] })
+  const [creatingTopic, setCreatingTopic] = useState(false)
+  const [topicBusy, setTopicBusy] = useState(false)
+  const [topicModalOpen, setTopicModalOpen] = useState(false)
+  const [promptUsed, setPromptUsed] = useState('')
 
   const loadMediaOptions = async () => {
     if (!desktop) return
@@ -450,6 +458,34 @@ function AiContentPage() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadStyles() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const loadTopics = async () => {
+    if (!desktop) return
+    try {
+      const list = await invokeDesktop('list_topics')
+      setTopics(list)
+      if (selectedTopicId && !list.some(t => t.id === selectedTopicId)) {
+        setSelectedTopicId('')
+      }
+    } catch (e) { setErr(String(e)) }
+  }
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadTopics() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSelectTopic = (id) => {
+    if (id === selectedTopicId) return
+    if (!id) {
+      setSelectedTopicId('')
+      setPrompt(freePrompt)
+    } else {
+      if (!selectedTopicId) setFreePrompt(prompt)
+      const t = topics.find(x => x.id === id)
+      setSelectedTopicId(id)
+      setPrompt(t ? t.template : '')
+    }
+    setErr(''); setMsg('')
+  }
+
   const handleSelectStyle = (id) => {
     const s = styles.find(x => x.id === id)
     if (!s) return
@@ -467,6 +503,9 @@ function AiContentPage() {
 
   const selectedStyle = styles.find(s => s.id === selectedStyleId) || null
   const stylePreview = ((selectedStyle && selectedStyle.content) || '').replace(/\s+/g, ' ').trim()
+
+  const selectedTopic = topics.find(t => t.id === selectedTopicId) || null
+  const topicPreview = selectedTopic ? (selectedTopic.template || '').replace(/\s+/g, ' ').trim() : 'Chế độ Tự do: không dùng danh sách random.'
 
   const startCreateStyle = () => {
     setCreatingStyle(true)
@@ -543,14 +582,74 @@ function AiContentPage() {
     } catch (e) { setErr(String(e)) } finally { setStyleBusy(false) }
   }
 
+  const openCreateTopicModal = () => {
+    setCreatingTopic(true)
+    setTopicDraft({ id: '', name: '', template: '', lists: [] })
+    setErr(''); setMsg('')
+    setTopicModalOpen(true)
+  }
+
+  const openEditTopicModal = () => {
+    const t = topics.find(x => x.id === selectedTopicId)
+    if (!t) return
+    setCreatingTopic(false)
+    setTopicDraft({
+      id: t.id,
+      name: t.name,
+      template: t.template,
+      lists: (t.lists || []).map(l => ({ name: l.name, variantsText: (l.variants || []).join('\n') }))
+    })
+    setErr('')
+    setTopicModalOpen(true)
+  }
+
+  const closeTopicModal = () => {
+    setErr('')
+    setTopicModalOpen(false)
+  }
+
+  const saveTopic = async () => {
+    setTopicBusy(true); setErr(''); setMsg('')
+    try {
+      const lists = topicDraft.lists
+        .map(l => ({ name: l.name.trim(), variants: l.variantsText.split('\n').map(s => s.trim()).filter(Boolean) }))
+        .filter(l => l.name || l.variants.length)
+      const payload = { name: topicDraft.name, template: topicDraft.template, lists }
+      const res = creatingTopic
+        ? await invokeDesktop('create_topic', { payload })
+        : await invokeDesktop('update_topic', { payload: { id: topicDraft.id, ...payload } })
+      await loadTopics()
+      setSelectedTopicId(res.id)
+      setPrompt(res.template || '')
+      setCreatingTopic(false)
+      setMsg(creatingTopic ? 'Đã thêm chủ đề' : 'Đã cập nhật chủ đề')
+      setTopicModalOpen(false)
+    } catch (e) { setErr(String(e)) } finally { setTopicBusy(false) }
+  }
+
+  const deleteTopic = async () => {
+    if (!window.confirm(`Xóa chủ đề "${topicDraft.name}"?`)) return
+    setTopicBusy(true); setErr(''); setMsg('')
+    try {
+      await invokeDesktop('delete_topic', { id: topicDraft.id })
+      setSelectedTopicId('')
+      setFreePrompt(prompt)
+      await loadTopics()
+      setMsg('Đã xóa chủ đề')
+      setTopicModalOpen(false)
+    } catch (e) { setErr(String(e)) } finally { setTopicBusy(false) }
+  }
+
   const generate = async () => {
     if (!prompt.trim()) { setErr('Vui lòng nhập prompt'); return }
     if (!styleDraft.content.trim()) { setErr('Nội dung style không được để trống'); return }
-    setBusy(true); setErr(''); setMsg('')
+    setBusy(true); setErr(''); setMsg(''); setPromptUsed('')
     try {
-      const res = await invokeDesktop('generate_content', { payload: { prompt, style: styleDraft.name.trim(), styleContent: styleDraft.content.trim() } })
+      const topicLists = (topics.find(t => t.id === selectedTopicId)?.lists) || []
+      const res = await invokeDesktop('generate_content', { payload: { prompt, style: styleDraft.name.trim(), styleContent: styleDraft.content.trim(), topicLists } })
       setTitle(res.title || '')
       setBody(res.body || '')
+      setPromptUsed(res.promptUsed || res.prompt || '')
       setMsg('Đã tạo nội dung')
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
@@ -560,9 +659,9 @@ function AiContentPage() {
     if (!prompt.trim()) { setErr('Prompt không được để trống'); return }
     setBusy(true); setErr(''); setMsg('')
     try {
-      await invokeDesktop('save_content', { payload: { title, body, prompt, style: styleDraft.name.trim(), customStyle: null, mediaIds } })
+      await invokeDesktop('save_content', { payload: { title, body, prompt, style: styleDraft.name.trim(), customStyle: null, mediaIds, topic: (topics.find(t => t.id === selectedTopicId)?.name) || null } })
       setMsg('Đã lưu vào Kho nội dung')
-      setPrompt(''); setTitle(''); setBody(''); setMediaIds([])
+      setPrompt(''); setTitle(''); setBody(''); setMediaIds([]); setFreePrompt(''); setSelectedTopicId(''); setPromptUsed('')
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
 
@@ -575,9 +674,25 @@ function AiContentPage() {
     {msg && <div className="desktop-notice" style={{background:'#eef7ee', borderColor:'#cde9cd', color:'#2e6b2e'}}><CircleCheck size={18}/><span>{msg}</span></div>}
     <div className="panel" style={{padding:20, display:'flex', flexDirection:'column', gap:16}}>
       <div>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, flexWrap:'wrap'}}>
+          <label style={{fontSize:14, fontWeight:700}}>Chủ đề</label>
+          <div style={{display:'flex', gap:8}}>
+            <button className="outline" onClick={openEditTopicModal} disabled={!desktop || busy || topicBusy || !selectedTopicId} style={{height:32}}><Pencil size={14}/> Sửa</button>
+            <button className="outline" onClick={openCreateTopicModal} disabled={!desktop || busy || topicBusy} style={{height:32}}><Plus size={14}/> Thêm chủ đề</button>
+          </div>
+        </div>
+        <select value={selectedTopicId} onChange={e=>handleSelectTopic(e.target.value)} disabled={!desktop || busy || topicBusy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:6}}>
+          <option value="">Tự do (nhập prompt trực tiếp)</option>
+          {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <div style={{display:'flex', alignItems:'center', gap:6, marginTop:6, color:'#6b6b76', fontSize:13, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}><FileText size={14}/><span style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{topicPreview}</span></div>
+        <div style={{fontSize:12, color:'#999', marginTop:4}}>Chỉnh sửa prompt bên dưới không tự lưu vào chủ đề; dùng nút Sửa để cập nhật chủ đề.</div>
+      </div>
+      <div>
         <label style={{fontSize:14, fontWeight:700}}>Prompt *</label>
-        <textarea placeholder="VD: Bí quyết năng lượng buổi sáng cho dân văn phòng..." value={prompt} onChange={e=>setPrompt(e.target.value)} maxLength={500} disabled={!desktop || busy} style={{width:'100%', minHeight:90, border:'1px solid #e2e1e7', borderRadius:8, padding:12, fontSize:14, marginTop:6, resize:'vertical'}}/>
-        <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{prompt.length}/500</div>
+        <textarea placeholder="VD: Bí quyết năng lượng buổi sáng cho dân văn phòng..." value={prompt} onChange={e=>setPrompt(e.target.value)} maxLength={4000} disabled={!desktop || busy} style={{width:'100%', minHeight:90, border:'1px solid #e2e1e7', borderRadius:8, padding:12, fontSize:14, marginTop:6, resize:'vertical'}}/>
+        <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{prompt.length}/4000</div>
+        {promptUsed && promptUsed !== prompt && <div style={{fontSize:12, color:'#999', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}>Đã dùng: {promptUsed}</div>}
       </div>
       <div style={{display:'grid', gridTemplateColumns:'1fr 160px', gap:12}}>
         <div>
@@ -622,7 +737,7 @@ function AiContentPage() {
         {mediaIds.length>0 && <div style={{fontSize:13, color:'#6558d6', marginTop:6}}>Đã chọn {mediaIds.length} media</div>}
       </div>
       <div style={{display:'flex', gap:8, justifyContent:'flex-end'}}>
-        <button className="outline" onClick={()=>{setPrompt(''); setTitle(''); setBody(''); setMediaIds([]); setMsg(''); setErr('')}} disabled={busy} style={{height:36}}>Xóa form</button>
+        <button className="outline" onClick={()=>{setPrompt(''); setTitle(''); setBody(''); setMediaIds([]); setFreePrompt(''); setSelectedTopicId(''); setPromptUsed(''); setMsg(''); setErr('')}} disabled={busy} style={{height:36}}>Xóa form</button>
         <button className="primary" onClick={save} disabled={!desktop || busy} style={{height:36}}><FileText size={16}/> Lưu vào kho</button>
       </div>
     </div>
@@ -653,6 +768,48 @@ function AiContentPage() {
             <button className="outline" onClick={resetStyle} disabled={!styleDraft.builtin || styleBusy} style={{height:32}}>Khôi phục mặc định</button>
             <button className="outline" onClick={deleteStyle} disabled={styleDraft.builtin || !styleDraft.id || styleBusy} style={{height:32, color:'#b55041'}}>Xóa</button>
             <button className="outline" onClick={closeStyleModal} style={{height:32}}>Đóng</button>
+          </div>
+        </div>
+      </div>
+    )}
+    {topicModalOpen && (
+      <div onClick={e=>{ if (e.target === e.currentTarget) closeTopicModal() }} style={{position:'fixed', inset:0, background:'#0006', display:'grid', placeItems:'center', zIndex:50}}>
+        <div role="dialog" aria-modal="true" aria-label={creatingTopic ? 'Thêm chủ đề' : 'Sửa chủ đề'} tabIndex={-1} className="panel" onKeyDown={e=>{ if (e.key === 'Escape') closeTopicModal() }} style={{width:'min(640px, 92vw)', maxHeight:'86vh', overflow:'auto', background:'#fff', borderRadius:12, padding:16, display:'grid', gap:10}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:8}}>
+            <label style={{fontSize:14, fontWeight:700}}>{creatingTopic ? 'Thêm chủ đề' : 'Sửa chủ đề'}</label>
+            <button className="outline" onClick={closeTopicModal} style={{height:32}}>Đóng</button>
+          </div>
+          <div>
+            <label style={{fontSize:13, fontWeight:600}}>Tên chủ đề</label>
+            <input autoFocus value={topicDraft.name} onChange={e=>setTopicDraft(d=>({...d, name:e.target.value}))} maxLength={60} disabled={busy || topicBusy} placeholder="VD: Nhân quả trong phật giáo" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
+          </div>
+          <div>
+            <label style={{fontSize:13, fontWeight:600}}>Prompt mẫu</label>
+            <textarea value={topicDraft.template} onChange={e=>setTopicDraft(d=>({...d, template:e.target.value}))} rows={8} maxLength={4000} disabled={busy || topicBusy} placeholder="VD: viết 1 đoạn văn theo phong cách [phong cách] về chủ đề Nhân quả trong phật giáo" style={{width:'100%', minHeight:120, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical', fontFamily:'inherit'}}/>
+            <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{topicDraft.template.length}/4000</div>
+          </div>
+          <div>
+            <label style={{fontSize:13, fontWeight:600}}>Danh sách từ/cụm từ</label>
+            <div style={{fontSize:12, color:'#999', marginTop:4}}>Dùng [tên danh sách] trong prompt mẫu để random.</div>
+            <div style={{display:'grid', gap:10, marginTop:8}}>
+              {topicDraft.lists.map((l, i) => (
+                <div key={i} style={{border:'1px solid #e8e8ed', borderRadius:10, padding:10, display:'grid', gap:8}}>
+                  <div style={{display:'flex', gap:8, alignItems:'center'}}>
+                    <input value={l.name} onChange={e=>setTopicDraft(d=>({...d, lists: d.lists.map((x,j)=>j===i?{...x,name:e.target.value}:x)}))} maxLength={60} placeholder="VD: phong cách" style={{flex:1, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', fontSize:14}}/>
+                    <button className="outline" onClick={()=>setTopicDraft(d=>({...d, lists: d.lists.filter((_,j)=>j!==i)}))} style={{height:32, color:'#b55041'}}>Xóa</button>
+                  </div>
+                  <textarea value={l.variantsText} onChange={e=>setTopicDraft(d=>({...d, lists: d.lists.map((x,j)=>j===i?{...x,variantsText:e.target.value}:x)}))} rows={4} placeholder="Mỗi dòng 1 cụm từ" style={{width:'100%', border:'1px solid #e2e1e7', borderRadius:8, padding:12, fontSize:14, resize:'vertical', fontFamily:'inherit'}}/>
+                </div>
+              ))}
+            </div>
+            <button className="outline" onClick={()=>setTopicDraft(d=>({...d, lists:[...d.lists, {name:'', variantsText:''}]}))} style={{height:32, marginTop:8}}><Plus size={14}/> Thêm danh sách</button>
+          </div>
+          {err && <div className="error-box">{err}</div>}
+          {msg && <div className="desktop-notice" style={{background:'#eef7ee', borderColor:'#cde9cd', color:'#2e6b2e'}}><CircleCheck size={18}/><span>{msg}</span></div>}
+          <div style={{display:'flex', gap:8, flexWrap:'wrap', justifyContent:'flex-end'}}>
+            <button className="primary" onClick={saveTopic} disabled={busy || topicBusy} style={{height:32}}><FileText size={14}/> Lưu thay đổi</button>
+            <button className="outline" onClick={deleteTopic} disabled={creatingTopic || !topicDraft.id || topicBusy} style={{height:32, color:'#b55041'}}>Xóa</button>
+            <button className="outline" onClick={closeTopicModal} style={{height:32}}>Đóng</button>
           </div>
         </div>
       </div>
@@ -871,7 +1028,7 @@ function ContentWarehousePage() {
 
   const filtered = items.filter(it => {
     if (filter !== 'all' && it.status !== filter) return false
-    if (query && !`${it.title} ${it.body} ${it.prompt}`.toLowerCase().includes(query.toLowerCase())) return false
+    if (query && !`${it.title} ${it.body} ${it.prompt} ${it.topic || ''}`.toLowerCase().includes(query.toLowerCase())) return false
     return true
   })
 
@@ -887,7 +1044,7 @@ function ContentWarehousePage() {
       <div><FileText size={18}/><span><b>{items.length}</b> tổng</span></div>
       <div><CircleCheck size={18}/><span><b>{items.filter(i=>i.status==='draft').length}</b> nháp</span></div>
       <div><Zap size={18}/><span><b>{items.filter(i=>i.status==='approved').length}</b> đã duyệt</span></div>
-      <div style={{flex:1, minWidth:160}}><Search size={14}/><input placeholder="Tìm theo tiêu đề, prompt..." value={query} onChange={e=>setQuery(e.target.value)} style={{border:0, outline:0, background:'transparent', flex:1, fontSize:14, width:'100%'}}/></div>
+      <div style={{flex:1, minWidth:160}}><Search size={14}/><input placeholder="Tìm theo tiêu đề, prompt, chủ đề..." value={query} onChange={e=>setQuery(e.target.value)} style={{border:0, outline:0, background:'transparent', flex:1, fontSize:14, width:'100%'}}/></div>
     </div>
     <div style={{display:'flex', gap:8, marginBottom:14}}>
       {[['all','Tất cả'],['draft','Draft'],['approved','Approved'],['archived','Archived']].map(([value,label]) => <button key={value} onClick={()=>setFilter(value)} className={filter===value ? 'primary' : 'outline'} style={{height:32, fontSize:14}}>{label}</button>)}
@@ -899,7 +1056,7 @@ function ContentWarehousePage() {
       </div>
       <strong style={{fontSize:14, lineHeight:1.4}}>{it.title}</strong>
       <span style={{fontSize:13, color:'#555', display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical', overflow:'hidden', whiteSpace:'pre-line'}}>{it.body}</span>
-      <span style={{fontSize:12, color:'#888'}}>Prompt: {it.prompt} • {formatDate(it.createdAt)} • {it.mediaIds?.length || 0} media</span>
+      <span style={{fontSize:12, color:'#888'}}>{it.topic ? `Chủ đề: ${it.topic} • ` : ''}Prompt: {it.prompt} • {formatDate(it.createdAt)} • {it.mediaIds?.length || 0} media</span>
       <div style={{display:'flex', gap:8, marginTop:4, flexWrap:'wrap'}}>
         <button className="outline" onClick={()=>approve(it.id)} disabled={it.status==='approved' || busy} style={{height:30, fontSize:13}}><CircleCheck size={12}/> Duyệt</button>
         <button className="primary" onClick={()=>setScheduleFor(it.id)} disabled={it.status!=='approved' || busy} title={it.status!=='approved' ? 'Hãy duyệt trước' : ''} style={{height:30, fontSize:13}}><CalendarDays size={12}/> Lên lịch</button>
@@ -926,7 +1083,7 @@ function ContentWarehousePage() {
                   payload: {
                     contentId: editing.id, title: editing.title, body: editing.body,
                     prompt: editing.prompt, style: editing.style, customStyle: editing.customStyle || null,
-                    mediaIds: editing.mediaIds || []
+                    mediaIds: editing.mediaIds || [], topic: editing.topic || null
                   }
                 })
                 setEditing(null); await refresh()
