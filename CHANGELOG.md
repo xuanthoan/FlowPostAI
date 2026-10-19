@@ -2,6 +2,14 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-19 — Tắt kiểm tra chính tả ở mọi ô nội dung
+### Changed
+- `index.html` — thêm `spellcheck="false"` trên thẻ `<html>` để mọi ô nhập kế thừa.
+- `src/App.jsx` — thêm `spellCheck={false}` cho 19 ô nhập văn bản (`input` text + `textarea`); không đổi hành vi, placeholder, `maxLength`, `disabled` hay style; không đụng `type="password"` và `type="datetime-local"`.
+### Verified
+- `npm run build` — `✓ built in 13.45s`, exit 0.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib` — `test result: ok. 187 passed; 0 failed`.
+
 ## [Unreleased] - 2026-10-19 — Chủ đề + random placeholder (frontend)
 ### Added
 - `src/App.jsx` — mục `Chủ đề` phía trên ô Prompt: select `Tự do`/chủ đề + `Sửa`/`Thêm chủ đề` + preview 1 dòng; modal chủ đề (tên ≤60, prompt mẫu ≤4000, editor danh sách "mỗi dòng 1 cụm từ"); dòng `Đã dùng:` hiển thị biến thể do Rust mở rộng.

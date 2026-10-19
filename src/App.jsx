@@ -241,16 +241,16 @@ function ProvidersPanel() {
         </div>
         <div>
           <label style={{fontSize:13, fontWeight:700}}>Provider ID</label>
-          <input value={form.id} onChange={e=>setForm(f=>({...f, id:e.target.value}))} disabled={mode==='edit' || busy} placeholder="acme-gateway" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14, background: mode==='edit' ? '#f9fafb' : '#fff'}}/>
+          <input spellCheck={false} value={form.id} onChange={e=>setForm(f=>({...f, id:e.target.value}))} disabled={mode==='edit' || busy} placeholder="acme-gateway" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14, background: mode==='edit' ? '#f9fafb' : '#fff'}}/>
           <div style={{fontSize:12, color:'#777', marginTop:4}}>Lowercase identifier, starting with a letter, that uniquely names this provider in requests and as its credential name.</div>
         </div>
         <div>
           <label style={{fontSize:13, fontWeight:700}}>Display name</label>
-          <input value={form.displayName} onChange={e=>setForm(f=>({...f, displayName:e.target.value}))} disabled={busy} placeholder="Display name" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
+          <input spellCheck={false} value={form.displayName} onChange={e=>setForm(f=>({...f, displayName:e.target.value}))} disabled={busy} placeholder="Display name" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
         </div>
         <div>
           <label style={{fontSize:13, fontWeight:700}}>Base URL</label>
-          <input value={form.baseUrl} onChange={e=>setForm(f=>({...f, baseUrl:e.target.value}))} disabled={busy} placeholder="Full endpoint URL e.g. https://api.example.com/v1/chat/completions" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
+          <input spellCheck={false} value={form.baseUrl} onChange={e=>setForm(f=>({...f, baseUrl:e.target.value}))} disabled={busy} placeholder="Full endpoint URL e.g. https://api.example.com/v1/chat/completions" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
         </div>
         <div>
           <label style={{fontSize:13, fontWeight:700}}>API key</label>
@@ -266,7 +266,7 @@ function ProvidersPanel() {
             {form.models.length ? <div style={{display:'flex', flexWrap:'wrap', gap:6, justifyContent:'flex-start'}}>{form.models.map(m=> <span key={m} style={{background:'#fff', border:'1px solid #e2e1e7', borderRadius:16, padding:'4px 10px', fontSize:13, display:'flex', alignItems:'center', gap:6}}>{m} <button onClick={()=>removeModel(m)} style={{border:0, background:'transparent', cursor:'pointer', padding:0}}><X size={12}/></button></span>)}</div> : 'No models will be shown in the selector. Unlisted IDs still be sent directly.'}
           </div>
           <div style={{display:'flex', gap:8, marginTop:8}}>
-            <input value={modelInput} onChange={e=>setModelInput(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter'){e.preventDefault(); addModel()} }} disabled={busy} placeholder="model-id, ví dụ xoay-vong-worker-web-128k" style={{flex:1, height:32, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', fontSize:14}}/>
+            <input spellCheck={false} value={modelInput} onChange={e=>setModelInput(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter'){e.preventDefault(); addModel()} }} disabled={busy} placeholder="model-id, ví dụ xoay-vong-worker-web-128k" style={{flex:1, height:32, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', fontSize:14}}/>
             <button className="outline" onClick={addModel} disabled={busy || !modelInput.trim()} style={{height:32, fontSize:13}}>Add model</button>
           </div>
         </div>
@@ -690,7 +690,7 @@ function AiContentPage() {
       </div>
       <div>
         <label style={{fontSize:14, fontWeight:700}}>Prompt *</label>
-        <textarea placeholder="VD: Bí quyết năng lượng buổi sáng cho dân văn phòng..." value={prompt} onChange={e=>setPrompt(e.target.value)} maxLength={4000} disabled={!desktop || busy} style={{width:'100%', minHeight:90, border:'1px solid #e2e1e7', borderRadius:8, padding:12, fontSize:14, marginTop:6, resize:'vertical'}}/>
+        <textarea spellCheck={false} placeholder="VD: Bí quyết năng lượng buổi sáng cho dân văn phòng..." value={prompt} onChange={e=>setPrompt(e.target.value)} maxLength={4000} disabled={!desktop || busy} style={{width:'100%', minHeight:90, border:'1px solid #e2e1e7', borderRadius:8, padding:12, fontSize:14, marginTop:6, resize:'vertical'}}/>
         <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{prompt.length}/4000</div>
         {promptUsed && promptUsed !== prompt && <div style={{fontSize:12, color:'#999', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}>Đã dùng: {promptUsed}</div>}
       </div>
@@ -722,11 +722,11 @@ function AiContentPage() {
       <div style={{height:1, background:'#eee'}}/>
       <div>
         <label style={{fontSize:14, fontWeight:700}}>Tiêu đề</label>
-        <input placeholder="Tiêu đề sẽ hiện sau khi Tạo..." value={title} onChange={e=>setTitle(e.target.value)} disabled={busy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
+        <input spellCheck={false} placeholder="Tiêu đề sẽ hiện sau khi Tạo..." value={title} onChange={e=>setTitle(e.target.value)} disabled={busy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
       </div>
       <div>
         <label style={{fontSize:14, fontWeight:700}}>Nội dung</label>
-        <textarea placeholder="Nội dung sẽ hiện sau khi Tạo — bạn có thể chỉnh sửa..." value={body} onChange={e=>setBody(e.target.value)} disabled={busy} style={{width:'100%', minHeight:160, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical'}}/>
+        <textarea spellCheck={false} placeholder="Nội dung sẽ hiện sau khi Tạo — bạn có thể chỉnh sửa..." value={body} onChange={e=>setBody(e.target.value)} disabled={busy} style={{width:'100%', minHeight:160, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical'}}/>
       </div>
       <div>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
@@ -753,11 +753,11 @@ function AiContentPage() {
           </div>
           <div>
             <label style={{fontSize:13, fontWeight:600}}>Tên style</label>
-            <input autoFocus value={styleDraft.name} onChange={e=>setStyleDraft(d=>({...d, name:e.target.value}))} maxLength={60} disabled={busy || styleBusy} placeholder="VD: Hài hước GenZ" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
+            <input spellCheck={false} autoFocus value={styleDraft.name} onChange={e=>setStyleDraft(d=>({...d, name:e.target.value}))} maxLength={60} disabled={busy || styleBusy} placeholder="VD: Hài hước GenZ" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
           </div>
           <div>
             <label style={{fontSize:13, fontWeight:600}}>Nội dung style</label>
-            <textarea value={styleDraft.content} onChange={e=>setStyleDraft(d=>({...d, content:e.target.value}))} rows={12} maxLength={4000} disabled={busy || styleBusy} placeholder="Mô tả đầy đủ giọng văn và cấu trúc bài viết cho style này..." style={{width:'100%', minHeight:140, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical', fontFamily:'inherit'}}/>
+            <textarea spellCheck={false} value={styleDraft.content} onChange={e=>setStyleDraft(d=>({...d, content:e.target.value}))} rows={12} maxLength={4000} disabled={busy || styleBusy} placeholder="Mô tả đầy đủ giọng văn và cấu trúc bài viết cho style này..." style={{width:'100%', minHeight:140, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical', fontFamily:'inherit'}}/>
             <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{styleDraft.content.length}/4000</div>
           </div>
           {err && <div className="error-box">{err}</div>}
@@ -781,11 +781,11 @@ function AiContentPage() {
           </div>
           <div>
             <label style={{fontSize:13, fontWeight:600}}>Tên chủ đề</label>
-            <input autoFocus value={topicDraft.name} onChange={e=>setTopicDraft(d=>({...d, name:e.target.value}))} maxLength={60} disabled={busy || topicBusy} placeholder="VD: Nhân quả trong phật giáo" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
+            <input spellCheck={false} autoFocus value={topicDraft.name} onChange={e=>setTopicDraft(d=>({...d, name:e.target.value}))} maxLength={60} disabled={busy || topicBusy} placeholder="VD: Nhân quả trong phật giáo" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
           </div>
           <div>
             <label style={{fontSize:13, fontWeight:600}}>Prompt mẫu</label>
-            <textarea value={topicDraft.template} onChange={e=>setTopicDraft(d=>({...d, template:e.target.value}))} rows={8} maxLength={4000} disabled={busy || topicBusy} placeholder="VD: viết 1 đoạn văn theo phong cách [phong cách] về chủ đề Nhân quả trong phật giáo" style={{width:'100%', minHeight:120, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical', fontFamily:'inherit'}}/>
+            <textarea spellCheck={false} value={topicDraft.template} onChange={e=>setTopicDraft(d=>({...d, template:e.target.value}))} rows={8} maxLength={4000} disabled={busy || topicBusy} placeholder="VD: viết 1 đoạn văn theo phong cách [phong cách] về chủ đề Nhân quả trong phật giáo" style={{width:'100%', minHeight:120, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical', fontFamily:'inherit'}}/>
             <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{topicDraft.template.length}/4000</div>
           </div>
           <div>
@@ -795,10 +795,10 @@ function AiContentPage() {
               {topicDraft.lists.map((l, i) => (
                 <div key={i} style={{border:'1px solid #e8e8ed', borderRadius:10, padding:10, display:'grid', gap:8}}>
                   <div style={{display:'flex', gap:8, alignItems:'center'}}>
-                    <input value={l.name} onChange={e=>setTopicDraft(d=>({...d, lists: d.lists.map((x,j)=>j===i?{...x,name:e.target.value}:x)}))} maxLength={60} placeholder="VD: phong cách" style={{flex:1, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', fontSize:14}}/>
+                    <input spellCheck={false} value={l.name} onChange={e=>setTopicDraft(d=>({...d, lists: d.lists.map((x,j)=>j===i?{...x,name:e.target.value}:x)}))} maxLength={60} placeholder="VD: phong cách" style={{flex:1, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', fontSize:14}}/>
                     <button className="outline" onClick={()=>setTopicDraft(d=>({...d, lists: d.lists.filter((_,j)=>j!==i)}))} style={{height:32, color:'#b55041'}}>Xóa</button>
                   </div>
-                  <textarea value={l.variantsText} onChange={e=>setTopicDraft(d=>({...d, lists: d.lists.map((x,j)=>j===i?{...x,variantsText:e.target.value}:x)}))} rows={4} placeholder="Mỗi dòng 1 cụm từ" style={{width:'100%', border:'1px solid #e2e1e7', borderRadius:8, padding:12, fontSize:14, resize:'vertical', fontFamily:'inherit'}}/>
+                  <textarea spellCheck={false} value={l.variantsText} onChange={e=>setTopicDraft(d=>({...d, lists: d.lists.map((x,j)=>j===i?{...x,variantsText:e.target.value}:x)}))} rows={4} placeholder="Mỗi dòng 1 cụm từ" style={{width:'100%', border:'1px solid #e2e1e7', borderRadius:8, padding:12, fontSize:14, resize:'vertical', fontFamily:'inherit'}}/>
                 </div>
               ))}
             </div>
@@ -965,7 +965,7 @@ function PublishModal({ onClose, onSuccess }) {
           <option value="">-- Chọn Trang --</option>
           {pages.map(p => <option key={p.id} value={p.id}>{p.name} ({p.id})</option>)}
         </select>
-        <textarea value={message} onChange={e=>setMessage(e.target.value)} placeholder="Nội dung bài đăng..." disabled={busy} style={{width:'100%', minHeight:100, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:8, fontSize:14, resize:'vertical'}} />
+        <textarea spellCheck={false} value={message} onChange={e=>setMessage(e.target.value)} placeholder="Nội dung bài đăng..." disabled={busy} style={{width:'100%', minHeight:100, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:8, fontSize:14, resize:'vertical'}} />
         <div>
           <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:4}}>
             <label style={{fontSize:13, fontWeight:700}}>Ảnh đính kèm (tùy chọn, 1 ảnh đầu)</label>
@@ -1044,7 +1044,7 @@ function ContentWarehousePage() {
       <div><FileText size={18}/><span><b>{items.length}</b> tổng</span></div>
       <div><CircleCheck size={18}/><span><b>{items.filter(i=>i.status==='draft').length}</b> nháp</span></div>
       <div><Zap size={18}/><span><b>{items.filter(i=>i.status==='approved').length}</b> đã duyệt</span></div>
-      <div style={{flex:1, minWidth:160}}><Search size={14}/><input placeholder="Tìm theo tiêu đề, prompt, chủ đề..." value={query} onChange={e=>setQuery(e.target.value)} style={{border:0, outline:0, background:'transparent', flex:1, fontSize:14, width:'100%'}}/></div>
+      <div style={{flex:1, minWidth:160}}><Search size={14}/><input spellCheck={false} placeholder="Tìm theo tiêu đề, prompt, chủ đề..." value={query} onChange={e=>setQuery(e.target.value)} style={{border:0, outline:0, background:'transparent', flex:1, fontSize:14, width:'100%'}}/></div>
     </div>
     <div style={{display:'flex', gap:8, marginBottom:14}}>
       {[['all','Tất cả'],['draft','Draft'],['approved','Approved'],['archived','Archived']].map(([value,label]) => <button key={value} onClick={()=>setFilter(value)} className={filter===value ? 'primary' : 'outline'} style={{height:32, fontSize:14}}>{label}</button>)}
@@ -1069,9 +1069,9 @@ function ContentWarehousePage() {
       <div className="modal" onClick={e=>e.stopPropagation()} style={{maxWidth:600, width:'90%', background:'#fff', borderRadius:12, padding:20, boxShadow:'0 8px 30px rgba(0,0,0,.2)'}}>
         <h2 style={{margin:0, fontSize:17}}>Sửa nội dung</h2>
         <div style={{display:'flex', flexDirection:'column', gap:10, marginTop:14}}>
-          <input value={editing.title} onChange={e=>setEditing({...editing, title:e.target.value})} placeholder="Tiêu đề" style={{padding:'8px 10px', border:'1px solid #e2e1e7', borderRadius:8, fontSize:14}}/>
-          <textarea value={editing.body} onChange={e=>setEditing({...editing, body:e.target.value})} placeholder="Nội dung" rows={5} style={{padding:'8px 10px', border:'1px solid #e2e1e7', borderRadius:8, fontSize:14, resize:'vertical'}}/>
-          <input value={editing.prompt} onChange={e=>setEditing({...editing, prompt:e.target.value})} placeholder="Prompt" style={{padding:'8px 10px', border:'1px solid #e2e1e7', borderRadius:8, fontSize:14}}/>
+          <input spellCheck={false} value={editing.title} onChange={e=>setEditing({...editing, title:e.target.value})} placeholder="Tiêu đề" style={{padding:'8px 10px', border:'1px solid #e2e1e7', borderRadius:8, fontSize:14}}/>
+          <textarea spellCheck={false} value={editing.body} onChange={e=>setEditing({...editing, body:e.target.value})} placeholder="Nội dung" rows={5} style={{padding:'8px 10px', border:'1px solid #e2e1e7', borderRadius:8, fontSize:14, resize:'vertical'}}/>
+          <input spellCheck={false} value={editing.prompt} onChange={e=>setEditing({...editing, prompt:e.target.value})} placeholder="Prompt" style={{padding:'8px 10px', border:'1px solid #e2e1e7', borderRadius:8, fontSize:14}}/>
           <div style={{display:'flex', gap:8, justifyContent:'flex-end', marginTop:10}}>
             <button className="outline" onClick={()=>setEditing(null)} style={{height:34}}>Hủy</button>
             <button className="primary" onClick={async () => {
@@ -1406,7 +1406,7 @@ function App() {
     </aside>
 
     <main>
-      <header><div className="search"><Search size={18}/><input aria-label="Tìm kiếm" placeholder="Tìm kiếm nội dung, bài viết..." disabled style={{opacity:0.6}}/></div><div className="head-actions"><button className="primary" onClick={createPost}><Plus size={19}/> Tạo nội dung mới</button></div></header>
+      <header><div className="search"><Search size={18}/><input spellCheck={false} aria-label="Tìm kiếm" placeholder="Tìm kiếm nội dung, bài viết..." disabled style={{opacity:0.6}}/></div><div className="head-actions"><button className="primary" onClick={createPost}><Plus size={19}/> Tạo nội dung mới</button></div></header>
       <div className="content">
         {active === 'AI Content' ? <AiContentPage/> : active === 'Kho nội dung' ? <ContentWarehousePage/> : active === 'Thư viện media' ? <MediaLibrary/> : active === 'Lịch nội dung' ? <SchedulePage/> : active === 'Cài đặt' ? <SettingsPage/> : <>
         <section className="welcome"><div><p>{today}</p><h1>{getGreeting()}</h1><div className="welcome-sub">Hôm nay bạn có <b>{dashboardScheduled} bài viết</b> đang chờ được đăng.</div></div><button className="outline" onClick={()=>setActive('Lịch nội dung')}><CalendarDays size={17}/> Xem lịch nội dung</button></section>
