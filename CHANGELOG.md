@@ -16,7 +16,7 @@ Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở �
 ### Notes
 - Entry lịch sử `[370d1bb]` (2026-09-05) giữ nguyên; câu "cần filter-repo riêng" trong đó đã lỗi thời và được entry này supersede.
 - CHƯA xác minh: trạng thái key trong `e2e/.env` trên đĩa (không đọc giá trị); việc GitHub còn phục vụ blob cũ theo SHA hay không (cần network/owner); số object unreachable (`git fsck` bị chặn trong sandbox).
-- Còn một **đoạn tiền tố key đã bị cắt** (dạng `sk-xxxx…`, không đủ để sử dụng) trong blob lịch sử của `e2e/providers.spec.ts` ở các commit `c0adfcb` và `462e2af`; đây không phải credential dùng được, nhưng KHÔNG thể xoá nếu không viết lại lịch sử lần nữa (cần quyết định riêng của chủ dự án).
+- Còn một **đoạn tiền tố key đã bị cắt** (dạng `sk-xxxx…`, không đủ để sử dụng) trong blob lịch sử của `e2e/providers.spec.ts` ở commit `c0adfcb` (commit `462e2af` đã gỡ nó; `git log -S` vẫn liệt kê cả hai commit vì số lần xuất hiện thay đổi); đây không phải credential dùng được, nhưng KHÔNG thể xoá nếu không viết lại lịch sử lần nữa (cần quyết định riêng của chủ dự án).
 
 ## [Unreleased] - 2026-10-19 — Style có nội dung chỉnh sửa được + lưu style tùy chỉnh
 ### Added
