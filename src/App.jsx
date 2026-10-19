@@ -529,7 +529,7 @@ function AiContentPage() {
       await invokeDesktop('delete_style', { id: styleDraft.id })
       await loadStyles()
       setMsg('Đã xóa style')
-      closeStyleModal()
+      setStyleModalOpen(false)
     } catch (e) { setErr(String(e)) } finally { setStyleBusy(false) }
   }
 
@@ -628,7 +628,7 @@ function AiContentPage() {
     </div>
     {styleModalOpen && (
       <div onClick={e=>{ if (e.target === e.currentTarget) closeStyleModal() }} style={{position:'fixed', inset:0, background:'#0006', display:'grid', placeItems:'center', zIndex:50}}>
-        <div role="dialog" aria-modal="true" aria-label={creatingStyle ? 'Thêm style mới' : 'Sửa style'} className="panel" onKeyDown={e=>{ if (e.key === 'Escape') closeStyleModal() }} style={{width:'min(560px, 92vw)', maxHeight:'86vh', overflow:'auto', background:'#fff', borderRadius:12, padding:16, display:'grid', gap:10}}>
+        <div role="dialog" aria-modal="true" aria-label={creatingStyle ? 'Thêm style mới' : 'Sửa style'} tabIndex={-1} className="panel" onKeyDown={e=>{ if (e.key === 'Escape') closeStyleModal() }} style={{width:'min(560px, 92vw)', maxHeight:'86vh', overflow:'auto', background:'#fff', borderRadius:12, padding:16, display:'grid', gap:10}}>
           <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:8}}>
             <label style={{fontSize:14, fontWeight:700}}>{creatingStyle ? 'Thêm style mới' : 'Sửa style'}</label>
             <div style={{display:'flex', alignItems:'center', gap:8}}>
@@ -638,7 +638,7 @@ function AiContentPage() {
           </div>
           <div>
             <label style={{fontSize:13, fontWeight:600}}>Tên style</label>
-            <input value={styleDraft.name} onChange={e=>setStyleDraft(d=>({...d, name:e.target.value}))} maxLength={60} disabled={busy || styleBusy} placeholder="VD: Hài hước GenZ" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
+            <input autoFocus value={styleDraft.name} onChange={e=>setStyleDraft(d=>({...d, name:e.target.value}))} maxLength={60} disabled={busy || styleBusy} placeholder="VD: Hài hước GenZ" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
           </div>
           <div>
             <label style={{fontSize:13, fontWeight:600}}>Nội dung style</label>

@@ -5,6 +5,8 @@ Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở �
 ## [Unreleased] - 2026-10-19 — Thu gọn khu vực cài đặt style trong trang Tạo nội dung AI
 ### Changed
 - `src/App.jsx` — box cấu hình style luôn-hiện được thay bằng hàng gọn: dropdown Style + nút `Sửa` (icon `Pencil`) + nút `Thêm style` (icon `Plus`) + badge `Mặc định`/`Tùy chỉnh` + đúng 1 dòng preview nội dung (ellipsis); editor chuyển thành modal popup chứa `Tên style`/`Nội dung style` và các nút `Lưu thay đổi`/`Nhân bản`/`Khôi phục mặc định`/`Xóa`/`Đóng`; đóng modal không lưu (không gọi invoke) và re-sync draft. Không đổi payload gửi backend (`styleContent`, `style`/`customStyle: null`), không đổi Rust, E2E vẫn 25 test / 5 file.
+### Fixed
+- `src/App.jsx` — xoá style đang chọn không còn ghi đè `styleDraft` bằng style đã xoá (tránh preview/payload lệch); modal nhận focus khi mở để ESC đóng được ngay.
 
 ## [Unreleased] - 2026-10-19 — Xác minh & hiệu chỉnh tài liệu bảo mật API key
 ### Fixed
