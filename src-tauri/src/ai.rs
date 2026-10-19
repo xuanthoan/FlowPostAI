@@ -12,6 +12,8 @@ pub struct GeneratePayload {
     pub style: String,
     #[serde(default)]
     pub custom_style: Option<String>,
+    #[serde(default)]
+    pub style_content: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -24,15 +26,24 @@ pub struct GenerateResult {
     pub is_mock: bool,
 }
 
-fn build_system_message(style: &str, custom_style: Option<&str>) -> String {
-    let style_label = if style == "Custom" {
+fn build_system_message(style: &str, custom_style: Option<&str>, style_content: Option<&str>) -> String {
+    let content = style_content.map(str::trim).filter(|s| !s.is_empty());
+    let style_label = if content.is_none() && style == "Custom" {
         custom_style.unwrap_or("Custom")
     } else {
         style
     };
+    let instruction = content
+        .map(|c| {
+            format!(
+                "\n\nHƯỚNG DẪN STYLE (áp dụng giọng văn/cấu trúc; nếu xung đột, QUY TẮC ĐỊNH DẠNG bên dưới luôn thắng):\n{}",
+                c
+            )
+        })
+        .unwrap_or_default();
     format!(
-        "Bạn là chuyên gia viết nội dung Facebook với style: {}\n\nQUY TẮC ĐỊNH DẠNG BẮT BUỘC (tuân thủ tuyệt đối):\n1. Chỉ viết văn bản thuần (plain text). KHÔNG dùng markdown.\n2. KHÔNG dùng các ký tự: #, ##, ###, **, *, _, `, >, hoặc gạch đầu dòng markdown.\n3. Dòng đầu tiên là TIÊU ĐỀ, viết IN HOA toàn bộ.\n4. Sau tiêu đề, để trống 2 dòng rồi mới viết phần thân bài.\n5. Không viết tiêu đề và thân bài trên cùng một dòng.\n6. NGÔN NGỮ BẮT BUỘC: Luôn trả lời bằng ĐÚNG ngôn ngữ mà người dùng đã dùng trong câu yêu cầu. Người dùng viết tiếng Việt thì trả về tiếng Việt; người dùng viết tiếng Anh thì trả về tiếng Anh. Không tự dịch hoặc đổi sang ngôn ngữ khác.",
-        style_label
+        "Bạn là chuyên gia viết nội dung Facebook với style: {}{}\n\nQUY TẮC ĐỊNH DẠNG BẮT BUỘC (tuân thủ tuyệt đối):\n1. Chỉ viết văn bản thuần (plain text). KHÔNG dùng markdown.\n2. KHÔNG dùng các ký tự: #, ##, ###, **, *, _, `, >, hoặc gạch đầu dòng markdown.\n3. Dòng đầu tiên là TIÊU ĐỀ, viết IN HOA toàn bộ.\n4. Sau tiêu đề, để trống 2 dòng rồi mới viết phần thân bài.\n5. Không viết tiêu đề và thân bài trên cùng một dòng.\n6. NGÔN NGỮ BẮT BUỘC: Luôn trả lời bằng ĐÚNG ngôn ngữ mà người dùng đã dùng trong câu yêu cầu. Người dùng viết tiếng Việt thì trả về tiếng Việt; người dùng viết tiếng Anh thì trả về tiếng Anh. Không tự dịch hoặc đổi sang ngôn ngữ khác.",
+        style_label, instruction
     )
 }
 
@@ -538,6 +549,7 @@ async fn call_ai_provider(
     prompt: &str,
     style: &str,
     custom_style: Option<&str>,
+    style_content: Option<&str>,
 ) -> Result<RawCompletion, String> {
     let (provider, key) = crate::providers::resolve_active_provider(app)?;
     let max_tokens = DEFAULT_MAX_TOKENS;
@@ -556,7 +568,7 @@ async fn call_ai_provider(
         .map_err(|e| format!("Không thể khởi tạo HTTP client: {}", e))?;
 
     let is_gemini = is_gemini_base_url(&provider.base_url);
-    let system_msg = build_system_message(style, custom_style);
+    let system_msg = build_system_message(style, custom_style, style_content);
     complete_with_retry(&client, &url, &key, &model, &system_msg, prompt, max_tokens, is_gemini).await
 }
 
@@ -570,7 +582,7 @@ pub async fn generate_content<R: Runtime>(app: AppHandle<R>, payload: GeneratePa
         return Err("Vui lòng chọn style".into());
     }
 
-    let raw = call_ai_provider(&app, &payload.prompt, &payload.style, payload.custom_style.as_deref()).await?;
+    let raw = call_ai_provider(&app, &payload.prompt, &payload.style, payload.custom_style.as_deref(), payload.style_content.as_deref()).await?;
     let (title, body) = parse_ai_response(&raw.content);
     if looks_like_mojibake(&title) || looks_like_mojibake(&body) {
         log_mojibake_preview(&raw.content);
@@ -676,7 +688,7 @@ mod tests {
 
     #[test]
     fn test_build_system_message_contains_format_rules() {
-        let msg = build_system_message("Viral", None);
+        let msg = build_system_message("Viral", None, None);
         assert!(msg.contains("chuyên gia viết nội dung Facebook"));
         assert!(msg.contains("KHÔNG dùng markdown"));
         assert!(msg.contains("IN HOA"));
@@ -732,15 +744,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_build_system_message() {
-        let msg = build_system_message("Viral", None);
+        let msg = build_system_message("Viral", None, None);
         assert!(msg.contains("Viral"));
         assert!(msg.contains("chuyên gia viết nội dung Facebook"));
     }
 
     #[tokio::test]
     async fn test_build_system_message_custom() {
-        let msg = build_system_message("Custom", Some("Hài hước GenZ"));
+        let msg = build_system_message("Custom", Some("Hài hước GenZ"), None);
         assert!(msg.contains("Hài hước GenZ"));
+    }
+
+    #[test]
+    fn test_build_system_message_includes_style_content() {
+        let msg = build_system_message("Viral", None, Some("Viết ngắn gọn, nhiều ví dụ"));
+        assert!(msg.contains("Viết ngắn gọn, nhiều ví dụ"));
+        assert!(msg.contains("HƯỚNG DẪN STYLE"));
+        assert!(msg.contains("KHÔNG dùng markdown"));
+        assert!(msg.contains("2 dòng"));
+    }
+
+    #[test]
+    fn test_build_system_message_without_style_content_falls_back() {
+        let msg = build_system_message("Viral", None, None);
+        assert!(msg.contains("Bạn là chuyên gia viết nội dung Facebook với style: Viral\n\nQUY TẮC"));
+        assert!(!msg.contains("HƯỚNG DẪN STYLE"));
     }
 
     #[tokio::test]
@@ -1093,7 +1121,7 @@ mod tests {
 
     #[test]
     fn test_build_system_message_contains_language_rule() {
-        let msg = build_system_message("Viral", None);
+        let msg = build_system_message("Viral", None, None);
         assert!(msg.contains("NGÔN NGỮ BẮT BUỘC"));
         assert!(msg.contains("ĐÚNG ngôn ngữ"));
         assert!(msg.contains("tiếng Việt"));

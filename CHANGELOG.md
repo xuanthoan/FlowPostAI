@@ -2,6 +2,28 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-19 — Style có nội dung chỉnh sửa được + lưu style tùy chỉnh
+### Added
+- `src-tauri/src/styles.rs` — store `styles.json` trong app_data_dir: CRUD (thêm/sửa/nhân bản/xóa/khôi phục mặc định), seed 3 built-in cố định `viral`/`motivational`/`story`, tự chữa lành (self-heal: dedupe id, seed lại built-in bị xóa, đặt lại entry mặc định bị rỗng), 20 unit test.
+- `src-tauri/src/lib.rs` — đăng ký 6 command `styles::list_styles`, `styles::create_style`, `styles::update_style`, `styles::duplicate_style`, `styles::delete_style`, `styles::reset_style`.
+- `e2e/styles.spec.ts` — 6 test E2E (mock stateful) cho `list_styles`/`create_style`/`update_style`/`duplicate_style`/`delete_style`/`reset_style`.
+### Changed
+- `src-tauri/src/ai.rs` — `GeneratePayload.styleContent`; `build_system_message` nhận thêm khối hướng dẫn style (áp dụng giọng văn/cấu trúc, quy tắc định dạng luôn thắng khi xung đột), giữ nguyên hành vi byte-for-byte khi không có nội dung; thêm 2 test.
+- `src/App.jsx` — chọn style hiển thị đầy đủ nội dung cấu hình để xem/sửa; thêm/nhân bản/xóa/khôi phục mặc định; bỏ tùy chọn `Custom` + ô `customStyle` ở trang AI; `generate_content` gửi `styleContent`; `save_content` lưu TÊN style và `customStyle: null`.
+- `e2e/ai.spec.ts` — mock `generate_content` echo thêm `styleContent`.
+### Fixed
+- `src-tauri/src/styles.rs` — sửa lỗi toàn bộ chuỗi tiếng Việt bị mojibake (double-encoded) trong bản đầu tiên; thêm test `test_vietnamese_literals_are_not_mojibaked` (chỉ dùng escape ASCII nên không thể bị hỏng theo) để chặn tái phát.
+### Verified
+- `cargo check --manifest-path src-tauri/Cargo.toml` → `Finished` 0 lỗi (7 warning dead-code có sẵn, không phát sinh mới).
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` → `test result: ok. 143 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s` (120 cũ + 21 styles + 2 ai).
+- `npm run lint` → exit 0 (không có output).
+- `npm run build` → `✓ 2395 modules transformed` / `✓ built in 7.00s`.
+- `npx playwright test --list` → `Total: 25 tests in 5 files` (19 cũ + 6 styles).
+### Notes
+- Nội dung style do người dùng sửa được lưu vào `styles.json` trong app_data_dir (không dùng localStorage).
+- `content.rs` và dữ liệu nội dung đã lưu giữ nguyên (không migration); `ContentItem.style`/`custom_style` vẫn lưu TÊN style.
+- Giao diện thật cần `npm run tauri:dev` để kiểm chứng.
+
 ## [Unreleased] - 2026-10-19 — Bỏ tính năng chọn độ dài bài viết (Ngắn/Vừa/Dài)
 ### Changed
 - `src-tauri/src/ai.rs` — bỏ `length` khỏi `GeneratePayload`, xoá `max_tokens_for_length`, cố định `DEFAULT_MAX_TOKENS = 2048` (giữ nguyên hành vi cũ vì trước đây nhánh mặc định cũng là 2048); cập nhật `EMPTY_BODY_ERROR` (bỏ câu "chọn độ dài khác").

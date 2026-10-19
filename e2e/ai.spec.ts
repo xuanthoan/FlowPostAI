@@ -20,6 +20,7 @@ window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
       isMock: false,
       prompt: payload.prompt,
       style: payload.style,
+      styleContent: payload?.styleContent ?? null,
     };
   }
   if (cmd === 'update_provider') {

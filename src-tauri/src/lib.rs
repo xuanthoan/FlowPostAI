@@ -12,6 +12,7 @@ mod facebook;
 mod providers;
 mod schedule;
 mod security;
+mod styles;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -391,6 +392,12 @@ pub fn run() {
             content::update_content_status,
             content::update_content,
             ai::generate_content,
+            styles::list_styles,
+            styles::create_style,
+            styles::update_style,
+            styles::duplicate_style,
+            styles::delete_style,
+            styles::reset_style,
             schedule::list_schedule,
             schedule::get_schedule,
             schedule::create_schedule,

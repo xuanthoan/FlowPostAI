@@ -406,8 +406,11 @@ function SettingsStatus() {
 function AiContentPage() {
   const desktop = isDesktop()
   const [prompt, setPrompt] = useState('')
-  const [style, setStyle] = useState('Viral')
-  const [customStyle, setCustomStyle] = useState('')
+  const [styles, setStyles] = useState([])
+  const [selectedStyleId, setSelectedStyleId] = useState('')
+  const [styleDraft, setStyleDraft] = useState({ id: '', name: '', content: '', builtin: false })
+  const [creatingStyle, setCreatingStyle] = useState(false)
+  const [styleBusy, setStyleBusy] = useState(false)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [busy, setBusy] = useState(false)
@@ -429,11 +432,100 @@ function AiContentPage() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { if (showPicker) loadMediaOptions() }, [showPicker]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const loadStyles = async () => {
+    if (!desktop) return
+    try {
+      const list = await invokeDesktop('list_styles')
+      setStyles(list)
+      if (!selectedStyleId || !list.some(s => s.id === selectedStyleId)) {
+        if (list.length) {
+          setSelectedStyleId(list[0].id)
+          setStyleDraft({ id: list[0].id, name: list[0].name, content: list[0].content, builtin: !!list[0].builtin })
+        }
+      }
+    } catch (e) { setErr(String(e)) }
+  }
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadStyles() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSelectStyle = (id) => {
+    const s = styles.find(x => x.id === id)
+    if (!s) return
+    setSelectedStyleId(id)
+    setStyleDraft({ id: s.id, name: s.name, content: s.content, builtin: !!s.builtin })
+    setCreatingStyle(false)
+    setErr(''); setMsg('')
+  }
+
+  const applyStyleResult = (res) => {
+    setSelectedStyleId(res.id)
+    setStyleDraft({ id: res.id, name: res.name, content: res.content, builtin: !!res.builtin })
+    setCreatingStyle(false)
+  }
+
+  const startCreateStyle = () => {
+    setCreatingStyle(true)
+    setStyleDraft({ id: '', name: '', content: '', builtin: false })
+    setErr(''); setMsg('')
+  }
+
+  const cancelCreateStyle = () => {
+    setCreatingStyle(false)
+    const s = styles.find(x => x.id === selectedStyleId)
+    if (s) setStyleDraft({ id: s.id, name: s.name, content: s.content, builtin: !!s.builtin })
+    setErr(''); setMsg('')
+  }
+
+  const saveStyle = async () => {
+    setStyleBusy(true); setErr(''); setMsg('')
+    try {
+      const res = creatingStyle
+        ? await invokeDesktop('create_style', { payload: { name: styleDraft.name, content: styleDraft.content } })
+        : await invokeDesktop('update_style', { payload: { id: styleDraft.id, name: styleDraft.name, content: styleDraft.content } })
+      await loadStyles()
+      applyStyleResult(res)
+      setMsg(creatingStyle ? 'Đã thêm style mới' : 'Đã cập nhật style')
+    } catch (e) { setErr(String(e)) } finally { setStyleBusy(false) }
+  }
+
+  const duplicateStyle = async () => {
+    setStyleBusy(true); setErr(''); setMsg('')
+    try {
+      const res = await invokeDesktop('duplicate_style', { id: styleDraft.id })
+      await loadStyles()
+      applyStyleResult(res)
+      setMsg('Đã nhân bản style')
+    } catch (e) { setErr(String(e)) } finally { setStyleBusy(false) }
+  }
+
+  const deleteStyle = async () => {
+    if (!window.confirm(`Xóa style "${styleDraft.name}"?`)) return
+    setStyleBusy(true); setErr(''); setMsg('')
+    try {
+      await invokeDesktop('delete_style', { id: styleDraft.id })
+      await loadStyles()
+      setMsg('Đã xóa style')
+      setCreatingStyle(false)
+    } catch (e) { setErr(String(e)) } finally { setStyleBusy(false) }
+  }
+
+  const resetStyle = async () => {
+    setStyleBusy(true); setErr(''); setMsg('')
+    try {
+      const res = await invokeDesktop('reset_style', { id: styleDraft.id })
+      await loadStyles()
+      applyStyleResult(res)
+      setMsg('Đã khôi phục style mặc định')
+    } catch (e) { setErr(String(e)) } finally { setStyleBusy(false) }
+  }
+
   const generate = async () => {
     if (!prompt.trim()) { setErr('Vui lòng nhập prompt'); return }
+    if (!styleDraft.content.trim()) { setErr('Nội dung style không được để trống'); return }
     setBusy(true); setErr(''); setMsg('')
     try {
-      const res = await invokeDesktop('generate_content', { payload: { prompt, style, customStyle: customStyle || null } })
+      const res = await invokeDesktop('generate_content', { payload: { prompt, style: styleDraft.name.trim(), styleContent: styleDraft.content.trim() } })
       setTitle(res.title || '')
       setBody(res.body || '')
       setMsg('Đã tạo nội dung')
@@ -445,7 +537,7 @@ function AiContentPage() {
     if (!prompt.trim()) { setErr('Prompt không được để trống'); return }
     setBusy(true); setErr(''); setMsg('')
     try {
-      await invokeDesktop('save_content', { payload: { title, body, prompt, style, customStyle: customStyle || null, mediaIds } })
+      await invokeDesktop('save_content', { payload: { title, body, prompt, style: styleDraft.name.trim(), customStyle: null, mediaIds } })
       setMsg('Đã lưu vào Kho nội dung')
       setPrompt(''); setTitle(''); setBody(''); setMediaIds([])
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
@@ -467,18 +559,40 @@ function AiContentPage() {
       <div style={{display:'grid', gridTemplateColumns:'1fr 160px', gap:12}}>
         <div>
           <label style={{fontSize:14, fontWeight:700}}>Style</label>
-          <select value={style} onChange={e=>setStyle(e.target.value)} disabled={busy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:6}}>
-            <option>Viral</option><option>Motivational</option><option>Story</option><option>Custom</option>
+          <select value={selectedStyleId} onChange={e=>handleSelectStyle(e.target.value)} disabled={!desktop || busy || styleBusy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:6}}>
+            {styles.length ? styles.map(s => <option key={s.id} value={s.id}>{s.name}</option>) : <option value="">Mở app desktop để tải style</option>}
           </select>
+          {!desktop && <div style={{fontSize:12, color:'#999', marginTop:4}}>Mở app desktop để tải style</div>}
         </div>
         <div style={{display:'flex', alignItems:'flex-end'}}>
           <button className="primary" onClick={generate} disabled={!desktop || busy || !prompt.trim()} style={{width:'100%', height:36, justifyContent:'center'}}><Sparkles size={16}/> {busy ? 'Đang tạo...' : 'Tạo nội dung'}</button>
         </div>
       </div>
-      {style === 'Custom' && <div>
-        <label style={{fontSize:14, fontWeight:700}}>Custom style</label>
-        <input placeholder="VD: Hài hước GenZ, Trang trọng..." value={customStyle} onChange={e=>setCustomStyle(e.target.value)} disabled={busy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
-      </div>}
+      <div style={{border:'1px solid #e8e8ed', borderRadius:10, padding:14, display:'flex', flexDirection:'column', gap:12, background:'#fafaff'}}>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+          <label style={{fontSize:14, fontWeight:700}}>{creatingStyle ? 'Thêm style mới' : 'Cấu hình style'}</label>
+          {!creatingStyle && <span style={{fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:999, background: styleDraft.builtin ? '#efeeff' : '#eef7ee', color: styleDraft.builtin ? '#6558d6' : '#2e6b2e'}}>{styleDraft.builtin ? 'Mặc định' : 'Tùy chỉnh'}</span>}
+        </div>
+        <div>
+          <label style={{fontSize:13, fontWeight:600}}>Tên style</label>
+          <input value={styleDraft.name} onChange={e=>setStyleDraft(d=>({...d, name:e.target.value}))} maxLength={60} disabled={busy || styleBusy} placeholder="VD: Hài hước GenZ" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
+        </div>
+        <div>
+          <label style={{fontSize:13, fontWeight:600}}>Nội dung style</label>
+          <textarea value={styleDraft.content} onChange={e=>setStyleDraft(d=>({...d, content:e.target.value}))} rows={12} maxLength={4000} disabled={busy || styleBusy} placeholder="Mô tả đầy đủ giọng văn và cấu trúc bài viết cho style này..." style={{width:'100%', minHeight:140, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical', fontFamily:'inherit'}}/>
+          <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{styleDraft.content.length}/4000</div>
+        </div>
+        {!creatingStyle ? <div style={{display:'flex', gap:8, flexWrap:'wrap', justifyContent:'flex-end'}}>
+          <button className="outline" onClick={saveStyle} disabled={busy || styleBusy || !styleDraft.id} style={{height:32}}><FileText size={14}/> Lưu thay đổi</button>
+          <button className="outline" onClick={duplicateStyle} disabled={busy || styleBusy || !styleDraft.id} style={{height:32}}>Nhân bản</button>
+          <button className="outline" onClick={deleteStyle} disabled={busy || styleBusy || styleDraft.builtin || !styleDraft.id} title={styleDraft.builtin ? 'Không thể xóa style mặc định' : ''} style={{height:32}}>Xóa</button>
+          {styleDraft.builtin && <button className="outline" onClick={resetStyle} disabled={busy || styleBusy} style={{height:32}}>Khôi phục mặc định</button>}
+          <button className="outline" onClick={startCreateStyle} disabled={busy || styleBusy} style={{height:32}}><Plus size={14}/> Thêm style mới</button>
+        </div> : <div style={{display:'flex', gap:8, justifyContent:'flex-end'}}>
+          <button className="outline" onClick={cancelCreateStyle} disabled={busy || styleBusy} style={{height:32}}>Hủy</button>
+          <button className="primary" onClick={saveStyle} disabled={busy || styleBusy} style={{height:32}}><FileText size={14}/> Lưu style</button>
+        </div>}
+      </div>
       <div style={{height:1, background:'#eee'}}/>
       <div>
         <label style={{fontSize:14, fontWeight:700}}>Tiêu đề</label>
