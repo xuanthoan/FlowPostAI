@@ -408,7 +408,6 @@ function AiContentPage() {
   const [prompt, setPrompt] = useState('')
   const [style, setStyle] = useState('Viral')
   const [customStyle, setCustomStyle] = useState('')
-  const [length, setLength] = useState('Vừa')
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [busy, setBusy] = useState(false)
@@ -434,7 +433,7 @@ function AiContentPage() {
     if (!prompt.trim()) { setErr('Vui lòng nhập prompt'); return }
     setBusy(true); setErr(''); setMsg('')
     try {
-      const res = await invokeDesktop('generate_content', { payload: { prompt, style, customStyle: customStyle || null, length } })
+      const res = await invokeDesktop('generate_content', { payload: { prompt, style, customStyle: customStyle || null } })
       setTitle(res.title || '')
       setBody(res.body || '')
       setMsg('Đã tạo nội dung')
@@ -465,17 +464,11 @@ function AiContentPage() {
         <textarea placeholder="VD: Bí quyết năng lượng buổi sáng cho dân văn phòng..." value={prompt} onChange={e=>setPrompt(e.target.value)} maxLength={500} disabled={!desktop || busy} style={{width:'100%', minHeight:90, border:'1px solid #e2e1e7', borderRadius:8, padding:12, fontSize:14, marginTop:6, resize:'vertical'}}/>
         <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{prompt.length}/500</div>
       </div>
-      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:12}}>
+      <div style={{display:'grid', gridTemplateColumns:'1fr 160px', gap:12}}>
         <div>
           <label style={{fontSize:14, fontWeight:700}}>Style</label>
           <select value={style} onChange={e=>setStyle(e.target.value)} disabled={busy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:6}}>
             <option>Viral</option><option>Motivational</option><option>Story</option><option>Custom</option>
-          </select>
-        </div>
-        <div>
-          <label style={{fontSize:14, fontWeight:700}}>Độ dài</label>
-          <select value={length} onChange={e=>setLength(e.target.value)} disabled={busy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:6}}>
-            <option>Ngắn</option><option>Vừa</option><option>Dài</option>
           </select>
         </div>
         <div style={{display:'flex', alignItems:'flex-end'}}>

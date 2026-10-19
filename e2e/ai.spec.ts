@@ -67,7 +67,6 @@ test.describe('AI generate_content E2E (real server)', () => {
       prompt: 'Bí quyết năng lượng buổi sáng cho dân văn phòng',
       style: 'Viral',
       customStyle: null,
-      length: 'Vừa',
     };
     const res: any = await invoke(page, 'generate_content', { payload });
     expect(res.title).toBeTruthy();
@@ -77,19 +76,10 @@ test.describe('AI generate_content E2E (real server)', () => {
     expect(res.style).toBe(payload.style);
   });
 
-  test('generate_content respects length Ngắn/Dài', async ({ page }) => {
-    for (const length of ['Ngắn', 'Dài']) {
-      const res: any = await invoke(page, 'generate_content', {
-        payload: { prompt: 'Test length ' + length, style: 'Viral', customStyle: null, length },
-      });
-      expect(res.title).toBeTruthy();
-    }
-  });
-
   test('generate_content should fail without prompt', async ({ page }) => {
     try {
       await invoke(page, 'generate_content', {
-        payload: { prompt: '   ', style: 'Viral', customStyle: null, length: 'Vừa' },
+        payload: { prompt: '   ', style: 'Viral', customStyle: null },
       });
       throw new Error('should have failed');
     } catch (e) {

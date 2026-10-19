@@ -2,6 +2,20 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-19 — Bỏ tính năng chọn độ dài bài viết (Ngắn/Vừa/Dài)
+### Changed
+- `src-tauri/src/ai.rs` — bỏ `length` khỏi `GeneratePayload`, xoá `max_tokens_for_length`, cố định `DEFAULT_MAX_TOKENS = 2048` (giữ nguyên hành vi cũ vì trước đây nhánh mặc định cũng là 2048); cập nhật `EMPTY_BODY_ERROR` (bỏ câu "chọn độ dài khác").
+- `src/App.jsx` — bỏ dropdown "Độ dài" ở trang AI Content; grid 3 cột → 2 cột; payload `generate_content` không còn gửi `length`.
+- `e2e/ai.spec.ts` — bỏ `length` khỏi payload test và xoá test `generate_content respects length Ngắn/Dài` (đã lỗi thời).
+### Verified
+- `cargo check --manifest-path src-tauri/Cargo.toml` → `Finished` 0 lỗi (7 warning dead-code có sẵn, không phát sinh mới).
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` → `test result: ok. 120 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.56s` (119 cũ − 1 xoá + 2 mới).
+- `npm run lint` → exit 0 (không có output).
+- `npm run build` → `✓ 2395 modules transformed` / `✓ built in 11.39s`.
+- `npx playwright test --list` → `Total: 19 tests in 4 files` (giảm 1 test đã xoá).
+### Notes
+- Độ dài bài viết giờ do người dùng mô tả trong prompt; `customStyle` và nhánh `Custom` vẫn giữ nguyên (sẽ thay đổi ở phần Style sau).
+
 ## [Unreleased] - 2026-10-18 — Fix AI trả về tiêu đề cụt + thân bài rỗng (Gemini thinking budget)
 ### Fixed
 - `src-tauri/src/ai.rs` — Gemini 2.5/3.x là thinking model; trên endpoint OpenAI-compat, `max_tokens` bị tính chung cho cả phần suy luận lẫn output hiển thị nên 250/500/800 token bị "đốt" hết vào suy luận → model cắt còn đúng một dòng tiêu đề dở (`finish_reason:"length"`) và thân bài rỗng, nhưng app vẫn báo "Đã tạo nội dung". Nay app hạ `reasoning_effort` cho host Gemini, phát hiện `finish_reason == "length"`, thử lại 1 lần với ngân sách token gấp đôi, và báo lỗi tiếng Việt rõ ràng thay vì "thành công giả" khi thân bài rỗng

@@ -12,8 +12,6 @@ pub struct GeneratePayload {
     pub style: String,
     #[serde(default)]
     pub custom_style: Option<String>,
-    #[serde(default)]
-    pub length: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -329,23 +327,16 @@ fn log_mojibake_preview(s: &str) {
 }
 
 const AI_MAX_TOKENS_CAP: u32 = 8192;
+const DEFAULT_MAX_TOKENS: u32 = 2048;
 
 pub(crate) const EMPTY_BODY_ERROR: &str =
-    "AI không trả về nội dung (có thể bị cắt do giới hạn token). Vui lòng thử lại, chọn độ dài khác hoặc đổi model/provider.";
+    "AI không trả về nội dung (có thể bị cắt do giới hạn token). Vui lòng thử lại hoặc đổi model/provider.";
 
 fn ensure_body_present(body: &str) -> Result<(), String> {
     if body.trim().is_empty() {
         Err(EMPTY_BODY_ERROR.into())
     } else {
         Ok(())
-    }
-}
-
-fn max_tokens_for_length(length: Option<&str>) -> u32 {
-    match length {
-        Some("Ngắn") => 1024,
-        Some("Dài") => 4096,
-        _ => 2048,
     }
 }
 
@@ -547,10 +538,9 @@ async fn call_ai_provider(
     prompt: &str,
     style: &str,
     custom_style: Option<&str>,
-    length: Option<&str>,
 ) -> Result<RawCompletion, String> {
     let (provider, key) = crate::providers::resolve_active_provider(app)?;
-    let max_tokens = max_tokens_for_length(length);
+    let max_tokens = DEFAULT_MAX_TOKENS;
     let model = provider
         .models
         .first()
@@ -580,7 +570,7 @@ pub async fn generate_content<R: Runtime>(app: AppHandle<R>, payload: GeneratePa
         return Err("Vui lòng chọn style".into());
     }
 
-    let raw = call_ai_provider(&app, &payload.prompt, &payload.style, payload.custom_style.as_deref(), payload.length.as_deref()).await?;
+    let raw = call_ai_provider(&app, &payload.prompt, &payload.style, payload.custom_style.as_deref()).await?;
     let (title, body) = parse_ai_response(&raw.content);
     if looks_like_mojibake(&title) || looks_like_mojibake(&body) {
         log_mojibake_preview(&raw.content);
@@ -771,12 +761,17 @@ mod tests {
     }
 
     #[test]
-    fn test_max_tokens_for_length() {
-        assert_eq!(max_tokens_for_length(None), 2048);
-        assert_eq!(max_tokens_for_length(Some("Vừa")), 2048);
-        assert_eq!(max_tokens_for_length(Some("Ngắn")), 1024);
-        assert_eq!(max_tokens_for_length(Some("Dài")), 4096);
-        assert_eq!(max_tokens_for_length(Some("unknown")), 2048);
+    fn test_default_max_tokens_is_2048() {
+        assert_eq!(DEFAULT_MAX_TOKENS, 2048);
+    }
+
+    #[test]
+    fn test_generate_payload_ignores_unknown_length() {
+        let p: GeneratePayload =
+            serde_json::from_str(r#"{"prompt":"x","style":"Viral","length":"Dài"}"#).unwrap();
+        assert_eq!(p.prompt, "x");
+        assert_eq!(p.style, "Viral");
+        assert!(p.custom_style.is_none());
     }
 
     #[test]
