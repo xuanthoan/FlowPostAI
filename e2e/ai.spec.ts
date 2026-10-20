@@ -6,11 +6,12 @@ const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:20128/v1';
 
 const mockImplCode = `
 window.__TAURI_MOCK__ = true;
-window.__TAURI_INTERNALS__ = {};
+window.__TAURI_INTERNALS__ = { invoke: (cmd, args) => window.__TAURI_MOCK_IMPL__(cmd, args) };
 window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
   const baseUrl = ${JSON.stringify(BASE_URL)};
   if (cmd === 'generate_content') {
     const payload = args?.payload;
+    window.__LAST_GENERATE_PAYLOAD__ = payload ?? null;
     if (!payload?.prompt || !payload.prompt.trim()) {
       throw new Error('Vui lòng nhập prompt');
     }
@@ -22,6 +23,19 @@ window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
       style: payload.style,
       styleContent: payload?.styleContent ?? null,
     };
+  }
+  if (cmd === 'list_styles') {
+    return [
+      {
+        id: 's1',
+        name: 'Viral',
+        content: 'Viết nội dung ngắn gọn, hấp dẫn cho mạng xã hội.',
+        builtin: true,
+      },
+    ];
+  }
+  if (cmd === 'list_topics') {
+    return [];
   }
   if (cmd === 'update_provider') {
     return {
@@ -35,11 +49,12 @@ window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
   }
   if (cmd === 'get_active_provider') {
     return {
-      id: 'custom-provider',
-      displayName: 'Custom provider',
-      baseUrl: baseUrl,
+      id: 'p1',
+      displayName: 'P1',
+      baseUrl: 'http://127.0.0.1:20128/v1',
       protocol: 'openai-completions',
-      models: ['xoay-vong-worker-web-128k'],
+      models: ['aihorde/2DN', 'text-model'],
+      defaultModel: 'text-model',
       hasApiKey: true,
     };
   }
@@ -75,6 +90,33 @@ test.describe('AI generate_content E2E (real server)', () => {
     expect(res.isMock).toBe(false);
     expect(res.prompt).toBe(payload.prompt);
     expect(res.style).toBe(payload.style);
+  });
+
+  test('AI Content uses provider default model unless a model is chosen', async ({ page }) => {
+    await page.getByRole('button', { name: 'AI Content', exact: true }).click();
+
+    const modelInput = page.getByRole('combobox', { name: 'Model', exact: true });
+    await expect(modelInput).toHaveAttribute('placeholder', 'Mặc định: text-model');
+
+    await page
+      .getByPlaceholder('VD: Bí quyết năng lượng buổi sáng cho dân văn phòng...')
+      .fill('Bí quyết năng lượng buổi sáng cho dân văn phòng');
+    await page.getByRole('button', { name: 'Tạo nội dung', exact: true }).click();
+    await expect(page.getByText('Đã tạo nội dung')).toBeVisible();
+
+    const firstPayload: any = await page.evaluate(
+      () => (window as any).__LAST_GENERATE_PAYLOAD__
+    );
+    expect(firstPayload).toBeTruthy();
+    expect(Object.prototype.hasOwnProperty.call(firstPayload, 'model')).toBe(false);
+
+    await modelInput.fill('my-text-model');
+    await page.getByRole('button', { name: 'Tạo nội dung', exact: true }).click();
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as any).__LAST_GENERATE_PAYLOAD__?.model)
+      )
+      .toBe('my-text-model');
   });
 
   test('generate_content should fail without prompt', async ({ page }) => {

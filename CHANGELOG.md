@@ -2,6 +2,23 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-20 — AI: chọn model viết rõ ràng, lỗi model tạo ảnh có gợi ý
+
+### Changed
+- `src-tauri/src/providers.rs` — provider có thêm `defaultModel` (serde mặc định nên `providers.json` cũ vẫn đọc được), thêm hàm `resolve_model` với thứ tự: model truyền kèm, `defaultModel`, model đầu tiên trong danh sách, `DEFAULT_MODEL`.
+- `src-tauri/src/ai.rs` — `generate_content` nhận `model` tuỳ chọn; khi nhà cung cấp trả 400 nói model là model tạo ảnh, thêm gợi ý chọn model văn bản kèm tên model đã dùng.
+- `src/App.jsx` — Providers thêm ô `Model mặc định để viết`; AI Content thêm ô `Model` để ghi đè cho từng lần tạo.
+
+### Added
+- `e2e/ai.spec.ts` — kiểm thử model chỉ được gửi khi được chọn và placeholder hiển thị model mặc định.
+- Kiểm thử Rust: 14 test cho `resolve_model`, serde `defaultModel`, body request và gợi ý lỗi.
+
+### Verified
+- `cargo test --lib` — 224 passed / 0 failed.
+- `npm exec -- eslint .` — exit 0 (QA chạy lại độc lập).
+- `npm run build` — exit 0.
+- Playwright `e2e/ai.spec.ts` — 3 passed (QA chạy lại độc lập).
+
 ## [Unreleased] - 2026-10-20 — Kho nội dung: gợi ý chủ đề và style dùng theme sáng
 
 ### Changed

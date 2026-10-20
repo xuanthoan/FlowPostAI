@@ -89,7 +89,7 @@ function ProvidersPanel() {
   const desktop = isDesktop()
   const [providers, setProviders] = useState([])
   const [activeId, setActiveId] = useState('')
-  const [form, setForm] = useState({ id: '', displayName: '', baseUrl: DEFAULT_LOCAL_BASE_URL, apiKey: '', models: [] })
+  const [form, setForm] = useState({ id: '', displayName: '', baseUrl: DEFAULT_LOCAL_BASE_URL, apiKey: '', models: [], defaultModel: '' })
   const [presetKey, setPresetKey] = useState('')
   const [hasApiKey, setHasApiKey] = useState(false)
   const [modelInput, setModelInput] = useState('')
@@ -111,7 +111,7 @@ function ProvidersPanel() {
           if (found) active = found
         } catch (_e) { void _e }
         setActiveId(active.id)
-        setForm({ id: active.id, displayName: active.displayName || active.id, baseUrl: active.baseUrl, apiKey: '', models: active.models || [] })
+        setForm({ id: active.id, displayName: active.displayName || active.id, baseUrl: active.baseUrl, apiKey: '', models: active.models || [], defaultModel: active.defaultModel || '' })
         setHasApiKey(!!active.hasApiKey)
         setMode('edit')
         setPresetKey('')
@@ -125,7 +125,7 @@ function ProvidersPanel() {
   const selectProvider = (id) => {
     const p = providers.find(x => x.id === id)
     if (!p) return
-    setForm({ id: p.id, displayName: p.displayName || p.id, baseUrl: p.baseUrl, apiKey: '', models: p.models || [] })
+    setForm({ id: p.id, displayName: p.displayName || p.id, baseUrl: p.baseUrl, apiKey: '', models: p.models || [], defaultModel: p.defaultModel || '' })
     setHasApiKey(!!p.hasApiKey)
     setMode('edit')
     setPresetKey('')
@@ -133,7 +133,7 @@ function ProvidersPanel() {
   }
 
   const handleAddNew = () => {
-    setForm({ id: '', displayName: '', baseUrl: DEFAULT_LOCAL_BASE_URL, apiKey: '', models: [] })
+    setForm({ id: '', displayName: '', baseUrl: DEFAULT_LOCAL_BASE_URL, apiKey: '', models: [], defaultModel: '' })
     setHasApiKey(false)
     setMode('create')
     setPresetKey('custom')
@@ -174,11 +174,11 @@ function ProvidersPanel() {
     setBusy(true); setErr(''); setMsg('')
     try {
       if (mode === 'create') {
-        const payload = { id: form.id.trim().toLowerCase(), displayName: form.displayName || null, baseUrl: form.baseUrl.trim(), protocol: 'openai-completions', models: form.models, apiKey: form.apiKey || null }
+        const payload = { id: form.id.trim().toLowerCase(), displayName: form.displayName || null, baseUrl: form.baseUrl.trim(), protocol: 'openai-completions', models: form.models, defaultModel: form.defaultModel.trim(), apiKey: form.apiKey || null }
         await invokeDesktop('create_provider', { payload })
         setMsg('Đã tạo provider')
       } else {
-        const payload = { displayName: form.displayName || null, baseUrl: form.baseUrl.trim(), protocol: 'openai-completions', models: form.models, apiKey: form.apiKey || null }
+        const payload = { displayName: form.displayName || null, baseUrl: form.baseUrl.trim(), protocol: 'openai-completions', models: form.models, defaultModel: form.defaultModel.trim(), apiKey: form.apiKey || null }
         await invokeDesktop('update_provider', { id: form.id, payload })
         setMsg('Đã cập nhật provider')
       }
@@ -275,6 +275,13 @@ function ProvidersPanel() {
             <input spellCheck={false} value={modelInput} onChange={e=>setModelInput(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter'){e.preventDefault(); addModel()} }} disabled={busy} placeholder="model-id, ví dụ xoay-vong-worker-web-128k" style={{flex:1, height:32, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', fontSize:14}}/>
             <button className="outline" onClick={addModel} disabled={busy || !modelInput.trim()} style={{height:32, fontSize:13}}>Add model</button>
           </div>
+        </div>
+        <div>
+          <label style={{fontSize:13, fontWeight:700}}>Model mặc định để viết</label>
+          <div style={{marginTop:6}}>
+            <SuggestInput ariaLabel="Model mặc định để viết" placeholder="Để trống để dùng model đầu tiên trong danh sách" value={form.defaultModel} onChange={v=>setForm(f=>({...f, defaultModel:v}))} options={distinctSortedLabels([...(form.models||[]), ...(form.defaultModel.trim() ? [form.defaultModel] : [])])}/>
+          </div>
+          <div style={{fontSize:12, color:'#777', marginTop:4}}>Model này được dùng khi AI Content hoặc lịch AI không chọn model riêng.</div>
         </div>
       </div>
       <div style={{display:'flex', justifyContent:'flex-end', gap:8, marginTop:6}}>
@@ -412,6 +419,8 @@ function SettingsStatus() {
 function AiContentPage() {
   const desktop = isDesktop()
   const [prompt, setPrompt] = useState('')
+  const [activeProvider, setActiveProvider] = useState(null)
+  const [model, setModel] = useState('')
   const [styles, setStyles] = useState([])
   const [selectedStyleId, setSelectedStyleId] = useState('')
   const [styleDraft, setStyleDraft] = useState({ id: '', name: '', content: '', builtin: false })
@@ -479,6 +488,17 @@ function AiContentPage() {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadTopics() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const loadActiveProvider = async () => {
+    if (!desktop) return
+    try {
+      const active = await invokeDesktop('get_active_provider')
+      setActiveProvider(active || null)
+    } catch (_e) { void _e }
+  }
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadActiveProvider() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleSelectTopic = (id) => {
     if (id === selectedTopicId) return
     if (!id) {
@@ -513,6 +533,12 @@ function AiContentPage() {
 
   const selectedTopic = topics.find(t => t.id === selectedTopicId) || null
   const topicPreview = selectedTopic ? (selectedTopic.template || '').replace(/\s+/g, ' ').trim() : 'Chế độ Tự do: không dùng danh sách random.'
+
+  const providerModels = (activeProvider && activeProvider.models) || []
+  const providerDefault = ((activeProvider && activeProvider.defaultModel) || '').trim()
+  const effectiveDefaultModel = providerDefault || providerModels.map(m => String(m || '').trim()).find(Boolean) || ''
+  const modelOptions = distinctSortedLabels([...providerModels, ...(providerDefault ? [providerDefault] : [])])
+  const modelPlaceholder = effectiveDefaultModel ? `Mặc định: ${effectiveDefaultModel}` : 'Mặc định của provider'
 
   const startCreateStyle = () => {
     setCreatingStyle(true)
@@ -659,7 +685,10 @@ function AiContentPage() {
     setBusy(true); setErr(''); setMsg(''); setPromptUsed('')
     try {
       const topicLists = (topics.find(t => t.id === selectedTopicId)?.lists) || []
-      const res = await invokeDesktop('generate_content', { payload: { prompt, style: styleDraft.name.trim(), styleContent: styleDraft.content.trim(), topicLists } })
+      const chosenModel = model.trim()
+      const payload = { prompt, style: styleDraft.name.trim(), styleContent: styleDraft.content.trim(), topicLists }
+      if (chosenModel) payload.model = chosenModel
+      const res = await invokeDesktop('generate_content', { payload })
       setTitle(res.title || '')
       setBody(res.body || '')
       setPromptUsed(res.promptUsed || res.prompt || '')
@@ -714,13 +743,20 @@ function AiContentPage() {
         <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{prompt.length} ký tự</div>
         {promptUsed && promptUsed !== prompt && <div style={{fontSize:12, color:'#999', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}>Đã dùng: {promptUsed}</div>}
       </div>
-      <div style={{display:'grid', gridTemplateColumns:'1fr 160px', gap:12}}>
+      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 160px', gap:12}}>
         <div>
           <label style={{fontSize:14, fontWeight:700}}>Style</label>
           <select value={selectedStyleId} onChange={e=>handleSelectStyle(e.target.value)} disabled={!desktop || busy || styleBusy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:6}}>
             {styles.length ? styles.map(s => <option key={s.id} value={s.id}>{s.name}</option>) : <option value="">Mở app desktop để tải style</option>}
           </select>
           {!desktop && <div style={{fontSize:12, color:'#999', marginTop:4}}>Mở app desktop để tải style</div>}
+        </div>
+        <div>
+          <label style={{fontSize:14, fontWeight:700}}>Model</label>
+          <div style={{marginTop:6}}>
+            <SuggestInput ariaLabel="Model" placeholder={modelPlaceholder} value={model} onChange={setModel} options={modelOptions}/>
+          </div>
+          <div style={{fontSize:12, color:'#999', marginTop:4}}>Để trống để dùng model mặc định của provider.</div>
         </div>
         <div style={{display:'flex', alignItems:'flex-end'}}>
           <button className="primary" onClick={() => generate()} disabled={!desktop || busy || !prompt.trim()} style={{width:'100%', height:36, justifyContent:'center'}}><Sparkles size={16}/> {busy ? 'Đang tạo...' : 'Tạo nội dung'}</button>

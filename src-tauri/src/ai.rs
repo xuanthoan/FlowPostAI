@@ -24,6 +24,8 @@ pub struct GeneratePayload {
     #[serde(default)]
     pub style_content: Option<String>,
     #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
     pub topic_lists: Vec<crate::topics::TopicList>,
 }
 
@@ -531,6 +533,22 @@ fn is_gemini_base_url(base_url: &str) -> bool {
     }
 }
 
+const IMAGE_MODEL_HINT_PREFIX: &str = "\n\nGợi ý: ";
+
+fn is_image_generation_model_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("image-generation model") || lower.contains("/images/generations")
+}
+
+fn append_image_model_hint(base: String, model: &str, status: u16) -> String {
+    if status != 400 || !is_image_generation_model_error(&base) {
+        return base;
+    }
+    format!(
+        "{base}{IMAGE_MODEL_HINT_PREFIX}model '{model}' là model tạo ảnh, không dùng được để viết — hãy chọn model văn bản ở mục Model trong AI Content hoặc \"Model mặc định để viết\" trong Providers."
+    )
+}
+
 fn decide_retry(
     finish_reason: Option<&str>,
     content: &str,
@@ -557,6 +575,7 @@ async fn send_chat_once(
     url: &str,
     key: &str,
     body: &str,
+    model: &str,
 ) -> Result<RawCompletion, String> {
     let resp = client
         .post(url)
@@ -586,15 +605,28 @@ async fn send_chat_once(
             429 => "Quá nhiều yêu cầu, vui lòng thử lại sau.".to_string(),
             500 => "AI server đang gặp sự cố, vui lòng thử lại.".to_string(),
             _ => {
-                if let Ok(json) = serde_json::from_str::<Value>(&response_body) {
-                    if let Some(msg) = json.get("error").and_then(|e| e.get("message")).and_then(|m| m.as_str()) {
+                let base = if let Ok(json) = serde_json::from_str::<Value>(&response_body) {
+                    if let Some(msg) = json
+                        .get("error")
+                        .and_then(|e| e.get("message"))
+                        .and_then(|m| m.as_str())
+                    {
                         format!("Lỗi AI ({}): {}", status, msg)
                     } else {
-                        format!("Lỗi AI ({}): {}", status, &response_body.chars().take(300).collect::<String>())
+                        format!(
+                            "Lỗi AI ({}): {}",
+                            status,
+                            &response_body.chars().take(300).collect::<String>()
+                        )
                     }
                 } else {
-                    format!("Lỗi HTTP {}: {}", status, &response_body.chars().take(300).collect::<String>())
-                }
+                    format!(
+                        "Lỗi HTTP {}: {}",
+                        status,
+                        &response_body.chars().take(300).collect::<String>()
+                    )
+                };
+                append_image_model_hint(base, model, status)
             }
         };
         Err(error_msg)
@@ -669,7 +701,7 @@ async fn complete_with_retry(
     loop {
         let req = build_chat_request(model, system_msg, prompt, max_tokens, is_gemini);
         let body = serde_json::to_string(&req).map_err(|e| e.to_string())?;
-        let raw = send_chat_once(client, url, key, &body).await?;
+        let raw = send_chat_once(client, url, key, &body, model).await?;
         match decide_retry(raw.finish_reason.as_deref(), &raw.content, max_tokens, retries_done) {
             Some(next) => {
                 eprintln!(
@@ -693,8 +725,9 @@ async fn call_ai_provider(
     style: &str,
     custom_style: Option<&str>,
     style_content: Option<&str>,
+    model: Option<&str>,
 ) -> Result<RawCompletion, String> {
-    call_ai_provider_with(app, prompt, style, custom_style, style_content, None, None).await
+    call_ai_provider_with(app, prompt, style, custom_style, style_content, None, model).await
 }
 
 pub async fn call_ai_provider_with<R: Runtime>(
@@ -712,10 +745,7 @@ pub async fn call_ai_provider_with<R: Runtime>(
         crate::providers::resolve_active_provider(app)?
     };
     let max_tokens = DEFAULT_MAX_TOKENS;
-    let model = model
-        .map(|m| m.to_string())
-        .or_else(|| provider.models.first().cloned())
-        .unwrap_or_else(|| crate::providers::DEFAULT_MODEL.to_string());
+    let model = crate::providers::resolve_model(&provider, model);
     let url = crate::providers::chat_completions_url(&provider.base_url);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(AI_TIMEOUT_SECS))
@@ -740,7 +770,15 @@ pub async fn generate_content<R: Runtime>(app: AppHandle<R>, payload: GeneratePa
     ensure_style_content_size(payload.style_content.as_deref())?;
 
     let prompt_used = expand_prompt(&payload.prompt, &payload.topic_lists, prompt_seed())?;
-    let raw = call_ai_provider(&app, &prompt_used, &payload.style, payload.custom_style.as_deref(), payload.style_content.as_deref()).await?;
+    let raw = call_ai_provider(
+        &app,
+        &prompt_used,
+        &payload.style,
+        payload.custom_style.as_deref(),
+        payload.style_content.as_deref(),
+        payload.model.as_deref(),
+    )
+    .await?;
     let (title, body) = parse_ai_response(&raw.content);
     if looks_like_mojibake(&title) || looks_like_mojibake(&body) {
         log_mojibake_preview(&raw.content);
@@ -962,6 +1000,42 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_payload_accepts_model() {
+        let with_model: GeneratePayload =
+            serde_json::from_str(r#"{"prompt":"x","style":"Viral","model":"text-model"}"#).unwrap();
+        assert_eq!(with_model.model.as_deref(), Some("text-model"));
+
+        let without_model: GeneratePayload =
+            serde_json::from_str(r#"{"prompt":"x","style":"Viral"}"#).unwrap();
+        assert_eq!(without_model.model, None);
+    }
+
+    #[test]
+    fn test_chat_request_contains_selected_model() {
+        let req = build_chat_request("text-model", "sys", "user", 2048, false);
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"model\":\"text-model\""), "json={}", json);
+    }
+
+    #[test]
+    fn test_append_image_model_hint_appends_only_for_400_image_errors() {
+        let base = "Lỗi AI (400): Model 'aihorde/2DN' is an image-generation model".to_string();
+        let with_hint = append_image_model_hint(base.clone(), "aihorde/2DN", 400);
+        assert!(with_hint.starts_with(&base));
+        assert!(with_hint.contains("Gợi ý:"));
+        assert!(with_hint.contains("aihorde/2DN"));
+
+        let other = "Lỗi AI (400): bad request".to_string();
+        assert_eq!(append_image_model_hint(other.clone(), "m", 400), other);
+
+        let unauthorized = "Lỗi AI (401): image-generation model".to_string();
+        assert_eq!(
+            append_image_model_hint(unauthorized.clone(), "m", 401),
+            unauthorized
+        );
+    }
+
+    #[test]
     fn test_build_chat_request_gemini_includes_reasoning_effort_low() {
         let req = build_chat_request("m", "sys", "user", 2048, true);
         let json = serde_json::to_string(&req).unwrap();
@@ -1139,6 +1213,36 @@ mod tests {
 
         let requests = mock_server.received_requests().await.unwrap();
         assert_eq!(requests.len(), 1, "expected exactly 1 POST");
+    }
+
+    #[tokio::test]
+    async fn test_complete_with_retry_sends_selected_model_in_body() {
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(build_mock_response("Tiêu đề\n\n\nThân bài"))
+            .mount(&mock_server)
+            .await;
+
+        let client = reqwest::Client::builder().http1_only().build().unwrap();
+        let url = format!("{}/v1/chat/completions", mock_server.uri());
+        let _ = complete_with_retry(
+            &client,
+            &url,
+            "test_key_123",
+            "text-model",
+            "sys",
+            "user",
+            2048,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let requests = mock_server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        let body: Value = requests[0].body_json().unwrap();
+        assert_eq!(body["model"], "text-model");
     }
 
     #[tokio::test]
