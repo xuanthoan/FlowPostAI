@@ -2,6 +2,17 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-20 — Sắp xếp lại sidebar, đổi tên Lịch AI content và Lịch đăng bài
+
+### Changed
+- `src/App.jsx` — sắp xếp lại 8 mục sidebar theo thứ tự: Tổng quan, Kho nội dung, AI Content, Lịch AI content, Lịch đăng bài, Thư viện media, Đăng bài, Báo cáo.
+- `src/App.jsx` — đổi tên mục "Lịch AI tự động" thành "Lịch AI content" ở nav, routing key và tiêu đề trang `LỊCH AI CONTENT`.
+- `src/App.jsx` — đổi tên mục "Lịch nội dung" thành "Lịch đăng bài" ở nav, routing key, nút "Xem lịch đăng bài", callback `DashboardSchedulePanel.onViewAll` và tiêu đề trang `LỊCH ĐĂNG BÀI`.
+
+### Verified
+- `npm run build` — exit 0.
+- `npm run lint` — exit 0 trong phiên implement (QA reviewer bị sandbox chặn lệnh này).
+
 ## [Unreleased] - 2026-10-19 — Guard style/publish + counters + panic fix
 ### Added
 - `src/App.jsx` — 3 bộ đếm ký tự mới (Nội dung AI, Nội dung style, Nội dung bài đăng, Sửa nội dung kho) dùng `charCount` (code points).

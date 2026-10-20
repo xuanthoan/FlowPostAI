@@ -18,8 +18,9 @@ function getGreeting(date = new Date()) {
 }
 
 const nav = [
-  ['Tổng quan', LayoutDashboard], ['AI Content', Sparkles], ['Kho nội dung', FileText],
-  ['Thư viện media', Images], ['Lịch nội dung', CalendarDays], ['Lịch AI tự động', Bot], ['Đăng bài', Send], ['Báo cáo', BarChart3],
+  ['Tổng quan', LayoutDashboard], ['Kho nội dung', FileText], ['AI Content', Sparkles],
+  ['Lịch AI content', Bot], ['Lịch đăng bài', CalendarDays], ['Thư viện media', Images],
+  ['Đăng bài', Send], ['Báo cáo', BarChart3],
 ]
 
 function StatCard({ icon: Icon, iconClass, label, value, delta, sub }) {
@@ -1201,7 +1202,7 @@ function SchedulePage() {
   const formatFull = (iso) => new Intl.DateTimeFormat('vi-VN', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}).format(new Date(iso))
 
   return <section className="media-page">
-    <div className="page-heading"><div><p>LỊCH NỘI DUNG</p><h1>Lịch nội dung</h1><span>Lịch đăng theo tháng và hàng đợi · Cảnh báo trùng &lt;30 phút nhưng cho phép đăng trùng nếu chấp nhận.</span></div><div className="media-actions"><button className="outline" onClick={refresh} disabled={!desktop || busy}><RefreshCw size={16}/> Làm mới</button></div></div>
+    <div className="page-heading"><div><p>LỊCH ĐĂNG BÀI</p><h1>Lịch đăng bài</h1><span>Lịch đăng theo tháng và hàng đợi · Cảnh báo trùng &lt;30 phút nhưng cho phép đăng trùng nếu chấp nhận.</span></div><div className="media-actions"><button className="outline" onClick={refresh} disabled={!desktop || busy}><RefreshCw size={16}/> Làm mới</button></div></div>
     {!desktop && <div className="desktop-notice"><HardDrive size={23}/><div><strong>Hãy mở bằng ứng dụng FlowPost AI Desktop</strong><span>Chỉ bản Tauri mới đọc được lịch.</span></div></div>}
     {err && <div className="error-box">{err}</div>}
     <div style={{display:'flex', gap:8, marginBottom:14, flexWrap:'wrap', alignItems:'center'}}>
@@ -1431,8 +1432,8 @@ function App() {
     <main>
       <header><div className="search"><Search size={18}/><input spellCheck={false} aria-label="Tìm kiếm" placeholder="Tìm kiếm nội dung, bài viết..." disabled style={{opacity:0.6}}/></div><div className="head-actions"><button className="primary" onClick={createPost}><Plus size={19}/> Tạo nội dung mới</button></div></header>
       <div className="content">
-        {active === 'AI Content' ? <AiContentPage/> : active === 'Kho nội dung' ? <ContentWarehousePage/> : active === 'Thư viện media' ? <MediaLibrary/> : active === 'Lịch nội dung' ? <SchedulePage/> : active === 'Lịch AI tự động' ? <AutoSchedulePage desktop={desktop} /> : active === 'Cài đặt' ? <SettingsPage/> : <>
-        <section className="welcome"><div><p>{today}</p><h1>{getGreeting()}</h1><div className="welcome-sub">Hôm nay bạn có <b>{dashboardScheduled} bài viết</b> đang chờ được đăng.</div></div><button className="outline" onClick={()=>setActive('Lịch nội dung')}><CalendarDays size={17}/> Xem lịch nội dung</button></section>
+        {active === 'AI Content' ? <AiContentPage/> : active === 'Kho nội dung' ? <ContentWarehousePage/> : active === 'Thư viện media' ? <MediaLibrary/> : active === 'Lịch đăng bài' ? <SchedulePage/> : active === 'Lịch AI content' ? <AutoSchedulePage desktop={desktop} /> : active === 'Cài đặt' ? <SettingsPage/> : <>
+        <section className="welcome"><div><p>{today}</p><h1>{getGreeting()}</h1><div className="welcome-sub">Hôm nay bạn có <b>{dashboardScheduled} bài viết</b> đang chờ được đăng.</div></div><button className="outline" onClick={()=>setActive('Lịch đăng bài')}><CalendarDays size={17}/> Xem lịch đăng bài</button></section>
 
         <section className="stats-grid">
           <StatCard icon={FileText} iconClass="purple" label="Bài viết tháng này" value={String(dashboardPostsThisMonth)} delta="" sub="từ Kho nội dung"/>
@@ -1447,7 +1448,7 @@ function App() {
             <div className="chart-total"><strong>{dashboardChartData.reduce((s,c)=>s+c.engagement,0)}</strong><span> bài</span></div>
             <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><AreaChart data={dashboardChartData.length ? dashboardChartData : [{day:'T2',posts:0,engagement:0},{day:'T3',posts:0,engagement:0},{day:'T4',posts:0,engagement:0},{day:'T5',posts:0,engagement:0},{day:'T6',posts:0,engagement:0},{day:'T7',posts:0,engagement:0},{day:'CN',posts:0,engagement:0}]} margin={{top: 8, right: 8, left: -20, bottom: 0}}><defs><linearGradient id="colorEng" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#6558d6" stopOpacity={0.25}/><stop offset="95%" stopColor="#6558d6" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ececf2"/><XAxis dataKey="day" axisLine={false} tickLine={false} tick={{fill:'#8c8b98', fontSize:14}}/><YAxis axisLine={false} tickLine={false} tick={{fill:'#aaa9b3', fontSize:13}}/><Tooltip contentStyle={{border:'none', borderRadius:10, boxShadow:'0 8px 30px #2222'}}/><Area type="monotone" dataKey="engagement" stroke="#6558d6" strokeWidth={2.5} fill="url(#colorEng)"/></AreaChart></ResponsiveContainer></div>
           </div>
-          <DashboardSchedulePanel onViewAll={()=>setActive('Lịch nội dung')} />
+          <DashboardSchedulePanel onViewAll={()=>setActive('Lịch đăng bài')} />
         </section>
 
         <section className="panel recent">
@@ -1595,7 +1596,7 @@ function AutoSchedulePage({ desktop }) {
   }
 
   return <section className="media-page">
-    <div className="page-heading"><div><p>LỊCH AI TỰ ĐỘNG</p><h1>Lịch AI tự động</h1><span>Tự động tạo nội dung theo lịch và lưu vào Kho nội dung.</span></div><div className="media-actions"><button className="primary" onClick={openCreate} disabled={!desktop}><Plus size={16}/> Tạo lịch AI</button><button className="outline" onClick={load} disabled={!desktop || busy}><RefreshCw size={16}/> Làm mới</button></div></div>
+    <div className="page-heading"><div><p>LỊCH AI CONTENT</p><h1>Lịch AI content</h1><span>Tự động tạo nội dung theo lịch và lưu vào Kho nội dung.</span></div><div className="media-actions"><button className="primary" onClick={openCreate} disabled={!desktop}><Plus size={16}/> Tạo lịch AI</button><button className="outline" onClick={load} disabled={!desktop || busy}><RefreshCw size={16}/> Làm mới</button></div></div>
     {!desktop && <div className="desktop-notice"><HardDrive size={23}/><div><strong>Hãy mở bằng ứng dụng FlowPost AI Desktop</strong><span>Chỉ bản Tauri mới đọc được lịch.</span></div></div>}
     {err && <div className="error-box">{err}</div>}
     {msg && <div className="desktop-notice" style={{background:'#e8f5e9'}}><CircleCheck size={20}/><div><strong>{msg}</strong></div></div>}
