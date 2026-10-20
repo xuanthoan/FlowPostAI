@@ -2,6 +2,17 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-20 — Kho nội dung: lọc theo chủ đề và style
+
+### Added
+- `src/App.jsx` — thêm hai bộ lọc một lựa chọn ở Kho nội dung: lọc theo chủ đề (kèm mục `Chưa có chủ đề`) và lọc theo style (dùng tên style đã quy đổi).
+- `src/App.jsx` — danh sách lựa chọn lấy từ nội dung đang tải, gộp trùng không phân biệt hoa thường và sắp xếp theo tiếng Việt; bộ lọc kết hợp AND với trạng thái và từ khóa tìm kiếm.
+- `src/App.jsx` — giữ nguyên lựa chọn sau khi làm mới; nếu giá trị đã chọn không còn trong dữ liệu thì vẫn hiển thị thành một lựa chọn riêng thay vì để trống.
+
+### Verified
+- `npm run lint` — exit 0 trong phiên implement; QA chạy lại độc lập bằng `npm exec -- eslint .` — exit 0.
+- `npm run build` — exit 0.
+
 ## [Unreleased] - 2026-10-20 — Kho nội dung: giới hạn tiêu đề dài trong list
 
 ### Changed

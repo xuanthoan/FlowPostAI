@@ -1025,6 +1025,24 @@ const resolveStyleLabel = (styles, value) => {
   return match ? match.name : raw
 }
 
+const NO_TOPIC_FILTER_VALUE = '__none__'
+
+const filterLabelKey = (value) => String(value == null ? '' : value).trim().toLocaleLowerCase('vi')
+
+const distinctSortedLabels = (values) => {
+  const seen = new Set()
+  const labels = []
+  for (const value of values) {
+    const label = String(value == null ? '' : value).trim()
+    if (!label) continue
+    const key = filterLabelKey(label)
+    if (seen.has(key)) continue
+    seen.add(key)
+    labels.push(label)
+  }
+  return labels.sort((a, b) => a.localeCompare(b, 'vi'))
+}
+
 const CONTENT_PREVIEW_LIMITS = { body: 200, topic: 80, prompt: 120 }
 
 const previewText = (value, maxChars) => {
@@ -1043,6 +1061,8 @@ function ContentWarehousePage({ resolveStyleName }) {
   const [err, setErr] = useState('')
   const [scheduleFor, setScheduleFor] = useState(null)
   const [editing, setEditing] = useState(null)
+  const [topicFilter, setTopicFilter] = useState('')
+  const [styleFilter, setStyleFilter] = useState('')
 
   const refresh = async () => {
     if (!desktop) return
@@ -1064,9 +1084,24 @@ function ContentWarehousePage({ resolveStyleName }) {
     try { await invokeDesktop('update_content_status', { id, status: 'approved' }); await refresh() } catch (e) { setErr(String(e)) }
   }
 
+  const topicOptions = distinctSortedLabels(items.map(it => it.topic))
+  const hasUntopicedItem = items.some(it => !String(it.topic == null ? '' : it.topic).trim())
+  const topicMatched = topicOptions.find(topic => filterLabelKey(topic) === filterLabelKey(topicFilter))
+  const topicExtra = topicFilter && topicFilter !== NO_TOPIC_FILTER_VALUE && !topicMatched ? topicFilter : ''
+  const topicSelectValue = topicFilter === NO_TOPIC_FILTER_VALUE ? NO_TOPIC_FILTER_VALUE : (topicMatched || topicExtra || '')
+
+  const styleOptions = distinctSortedLabels(items.map(it => resolveStyleName(it.style)))
+  const styleMatched = styleOptions.find(style => filterLabelKey(style) === filterLabelKey(styleFilter))
+  const styleExtra = styleFilter && !styleMatched ? styleFilter : ''
+  const styleSelectValue = styleMatched || styleExtra || ''
+
   const filtered = items.filter(it => {
     if (filter !== 'all' && it.status !== filter) return false
     if (query && !`${it.title} ${it.body} ${it.prompt} ${it.topic || ''}`.toLowerCase().includes(query.toLowerCase())) return false
+    if (topicFilter === NO_TOPIC_FILTER_VALUE) {
+      if (String(it.topic == null ? '' : it.topic).trim()) return false
+    } else if (topicFilter && filterLabelKey(it.topic) !== filterLabelKey(topicFilter)) return false
+    if (styleFilter && filterLabelKey(resolveStyleName(it.style)) !== filterLabelKey(styleFilter)) return false
     return true
   })
 
@@ -1086,6 +1121,17 @@ function ContentWarehousePage({ resolveStyleName }) {
     </div>
     <div style={{display:'flex', gap:8, marginBottom:14}}>
       {[['all','Tất cả'],['draft','Draft'],['approved','Approved'],['archived','Archived']].map(([value,label]) => <button key={value} onClick={()=>setFilter(value)} className={filter===value ? 'primary' : 'outline'} style={{height:32, fontSize:14}}>{label}</button>)}
+      <select aria-label="Lọc theo chủ đề" value={topicSelectValue} onChange={e=>setTopicFilter(e.target.value)} style={{height:32, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', fontSize:14, marginLeft:'auto', maxWidth:220}}>
+        <option value="">Tất cả chủ đề</option>
+        {topicOptions.map(topic => <option key={topic} value={topic}>{topic}</option>)}
+        {topicExtra && <option value={topicExtra}>{topicExtra}</option>}
+        {(hasUntopicedItem || topicFilter === NO_TOPIC_FILTER_VALUE) && <option value={NO_TOPIC_FILTER_VALUE}>Chưa có chủ đề</option>}
+      </select>
+      <select aria-label="Lọc theo style" value={styleSelectValue} onChange={e=>setStyleFilter(e.target.value)} style={{height:32, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', fontSize:14, maxWidth:220}}>
+        <option value="">Tất cả style</option>
+        {styleOptions.map(style => <option key={style} value={style}>{style}</option>)}
+        {styleExtra && <option value={styleExtra}>{styleExtra}</option>}
+      </select>
     </div>
     {filtered.length ? <div className="panel" style={{padding:0}}>{filtered.map((it, index) => <article key={it.id} style={{padding:'12px 16px', display:'flex', gap:16, alignItems:'flex-start', borderBottom: index === filtered.length - 1 ? 'none' : '1px solid #f0f0f4'}}>
       <div style={{flex:1, minWidth:0, display:'flex', flexDirection:'column', gap:6}}>
