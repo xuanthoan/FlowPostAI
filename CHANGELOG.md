@@ -2,6 +2,16 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-20 — Kho nội dung: preview ngắn và bố cục dạng list
+
+### Changed
+- `src/App.jsx` — danh sách Kho nội dung chuyển từ lưới 2 cột card sang list một dòng mỗi item, có divider giữa các dòng và nút thao tác bên phải.
+- `src/App.jsx` — thêm `previewText` và `CONTENT_PREVIEW_LIMITS`: body 200, topic 80, prompt 120 code point; gộp khoảng trắng và chỉ thêm `…` khi bị cắt; meta line cắt một dòng, ngày và số media luôn hiển thị.
+
+### Verified
+- `npm run build` — exit 0.
+- `npm run lint` — exit 0 trong phiên implement (QA reviewer bị sandbox chặn lệnh này).
+
 ## [Unreleased] - 2026-10-20 — Sửa nhãn style hiển thị id thay vì tên
 
 ### Fixed
