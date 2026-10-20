@@ -2,6 +2,17 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-20 — Kho nội dung: ba ô tìm kiếm theo tiêu đề, chủ đề và style
+
+### Changed
+- `src/App.jsx` — thay ô tìm kiếm duy nhất bằng ba ô tìm kiếm nằm cùng hàng: tiêu đề/nội dung, chủ đề và style; mỗi ô khớp chuỗi con, không phân biệt hoa thường, bỏ khoảng trắng hai đầu và kết hợp AND với nhau cùng bộ lọc trạng thái.
+- `src/App.jsx` — bỏ hai dropdown lọc của entry trước, thay bằng gợi ý `datalist` lấy từ nội dung đang tải để không phải cuộn một danh sách dài.
+- `src/App.jsx` — ô tìm kiếm thứ nhất chỉ còn tìm trong tiêu đề, nội dung và prompt; tìm theo chủ đề dùng ô thứ hai, tìm theo style dùng ô thứ ba.
+
+### Verified
+- `npm run lint` — exit 0 trong phiên implement; QA chạy lại độc lập bằng `npm exec -- eslint .` — exit 0.
+- `npm run build` — exit 0.
+
 ## [Unreleased] - 2026-10-20 — Kho nội dung: lọc theo chủ đề và style
 
 ### Added
