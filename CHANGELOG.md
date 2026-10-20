@@ -2,6 +2,17 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-20 — Kho nội dung: preview ảnh và video đính kèm trong list
+
+### Changed
+- `src/App.jsx` — `ContentWarehousePage` tải `list_media` trong `refresh` và dựng bản đồ media theo id; mỗi dòng list hiển thị tối đa 4 thumbnail ảnh/video đính kèm dưới dòng meta, kèm `+N` khi có nhiều hơn 4.
+- `src/App.jsx` — bỏ qua media đã bị xóa (id stale) và cập nhật số lượng media theo số media còn tồn tại; video hiển thị badge `▶` và không tự phát.
+
+### Verified
+- `npm exec -- eslint .` — exit 0 (QA chạy lại độc lập).
+- `npm run build` — exit 0.
+- `git diff --check` — exit 0.
+
 ## [Unreleased] - 2026-10-20 — AI: chọn model viết rõ ràng, lỗi model tạo ảnh có gợi ý
 
 ### Changed

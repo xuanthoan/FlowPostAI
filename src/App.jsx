@@ -1230,6 +1230,7 @@ function ContentWarehousePage({ resolveStyleName }) {
   const [editing, setEditing] = useState(null)
   const [topicQuery, setTopicQuery] = useState('')
   const [styleQuery, setStyleQuery] = useState('')
+  const [mediaById, setMediaById] = useState({})
 
   const refresh = async () => {
     if (!desktop) return
@@ -1238,6 +1239,19 @@ function ContentWarehousePage({ resolveStyleName }) {
       const list = await invokeDesktop('list_content')
       setItems(list)
       setErr('')
+      try {
+        const stored = await invokeDesktop('list_media')
+        const withUrls = await Promise.all((stored || []).map(async item => ({
+          ...item,
+          url: await localAssetUrl(item.path),
+        })))
+        const map = {}
+        for (const m of withUrls) if (m && m.id) map[m.id] = m
+        setMediaById(map)
+      } catch (_e) {
+        void _e
+        setMediaById({})
+      }
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -1265,6 +1279,10 @@ function ContentWarehousePage({ resolveStyleName }) {
     if (styleNeedle && !`${resolveStyleName(it.style)} ${it.customStyle || ''}`.toLowerCase().includes(styleNeedle)) return false
     return true
   })
+
+  const attachedMedia = (it) => (it.mediaIds || [])
+    .map(id => mediaById[id])
+    .filter(Boolean)
 
   const formatDate = (iso) => {
     try { return new Intl.DateTimeFormat('vi-VN', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}).format(new Date(iso)) } catch { return iso }
@@ -1297,8 +1315,27 @@ function ContentWarehousePage({ resolveStyleName }) {
         <span style={{fontSize:13, color:'#555', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden', whiteSpace:'pre-line', wordBreak:'break-word'}}>{previewText(it.body, CONTENT_PREVIEW_LIMITS.body)}</span>
         <div style={{display:'flex', alignItems:'center', minWidth:0, fontSize:12, color:'#888', whiteSpace:'nowrap'}}>
           <span style={{flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{it.topic ? `Chủ đề: ${previewText(it.topic, CONTENT_PREVIEW_LIMITS.topic)} • ` : ''}Prompt: {previewText(it.prompt, CONTENT_PREVIEW_LIMITS.prompt)}</span>
-          <span style={{flexShrink:0}}> • {formatDate(it.createdAt)} • {it.mediaIds?.length || 0} media</span>
+          <span style={{flexShrink:0}}> • {formatDate(it.createdAt)} • {attachedMedia(it).length} media</span>
         </div>
+      {attachedMedia(it).length > 0 && (
+        <div style={{display:'flex', gap:6, flexWrap:'wrap', marginTop:2}}>
+          {attachedMedia(it).slice(0, 4).map(m => (
+            <div key={m.id} title={m.name} style={{width:56, height:56, borderRadius:6, overflow:'hidden', background:'#eee', position:'relative', flexShrink:0}}>
+              {m.mediaType === 'video'
+                ? <>
+                    <video src={m.url} muted preload="metadata" playsInline style={{width:'100%', height:'100%', objectFit:'cover', display:'block'}} />
+                    <span style={{position:'absolute', left:4, bottom:4, background:'#000000cc', color:'#fff', borderRadius:4, padding:'2px 5px', fontSize:10, fontWeight:700, lineHeight:1}}>▶</span>
+                  </>
+                : <img src={m.url} alt={m.name} loading="lazy" style={{width:'100%', height:'100%', objectFit:'cover', display:'block'}} />}
+            </div>
+          ))}
+          {attachedMedia(it).length > 4 && (
+            <div style={{width:56, height:56, borderRadius:6, background:'#eee', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, fontWeight:700, color:'#555', flexShrink:0}}>
+              +{attachedMedia(it).length - 4}
+            </div>
+          )}
+        </div>
+      )}
       </div>
       <div style={{display:'flex', gap:8, flexWrap:'wrap', flexShrink:0}}>
         <button className="outline" onClick={()=>approve(it.id)} disabled={it.status==='approved' || busy} style={{height:30, fontSize:13}}><CircleCheck size={12}/> Duyệt</button>
