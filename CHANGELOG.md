@@ -2,6 +2,16 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-20 — Kho nội dung: gợi ý chủ đề và style dùng theme sáng
+
+### Changed
+- `src/App.jsx` — thay hai gợi ý `<datalist>` của ô Chủ đề và Style bằng component `SuggestInput` tự viết: nền trắng, viền và bóng theo palette sáng của app, rộng đúng bằng ô nhập nên không còn hộp đen native tràn ra ngoài.
+- `src/App.jsx` — chọn gợi ý bằng chuột hoặc bàn phím (ArrowUp, ArrowDown, Enter, Escape, Tab), lọc gợi ý theo chuỗi con không phân biệt hoa thường, giữ nguyên placeholder, aria-label và logic lọc AND.
+
+### Verified
+- `npm exec -- eslint .` — exit 0 (QA chạy lại độc lập).
+- `npm run build` — exit 0 (QA chạy lại độc lập).
+
 ## [Unreleased] - 2026-10-20 — Kho nội dung: ba ô tìm kiếm theo tiêu đề, chủ đề và style
 
 ### Changed

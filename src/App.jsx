@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { LayoutDashboard, Sparkles, Images, CalendarDays, Send, BarChart3, Settings, Search, TrendingUp, FileText, Heart, MessageCircle, Plus, Clock3, CircleCheck, MoreHorizontal, WandSparkles, Zap, Upload, HardDrive, Film, Trash2, RefreshCw, X, Pencil, Bot } from 'lucide-react'
 import { invokeDesktop, isDesktop, localAssetUrl } from './tauri.js'
@@ -1050,6 +1050,139 @@ const previewText = (value, maxChars) => {
   return `${chars.slice(0, maxChars).join('').trimEnd()}…`
 }
 
+function SuggestInput({ ariaLabel, placeholder, value, onChange, options }) {
+  const [open, setOpen] = useState(false)
+  const [highlighted, setHighlighted] = useState(-1)
+  const wrapRef = useRef(null)
+  const listRef = useRef(null)
+  const listId = useId()
+
+  const needle = filterLabelKey(value)
+  const filtered = (needle
+    ? options.filter(option => filterLabelKey(option).includes(needle))
+    : options
+  ).slice(0, 50)
+  const showMenu = open && options.length > 0
+  const activeIndex = showMenu && highlighted >= 0 && highlighted < filtered.length
+    ? highlighted
+    : -1
+  const optionId = (index) => `${listId}-option-${index}`
+
+  const closeMenu = () => {
+    setOpen(false)
+    setHighlighted(-1)
+  }
+
+  useEffect(() => {
+    if (!open) return
+    const closeFromOutside = () => {
+      setOpen(false)
+      setHighlighted(-1)
+    }
+    const handleMouseDown = (event) => {
+      if (!wrapRef.current?.contains(event.target)) closeFromOutside()
+    }
+    document.addEventListener('mousedown', handleMouseDown)
+    window.addEventListener('blur', closeFromOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown)
+      window.removeEventListener('blur', closeFromOutside)
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!showMenu || activeIndex < 0) return
+    listRef.current
+      ?.querySelector(`[data-option-index="${activeIndex}"]`)
+      ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [showMenu, activeIndex])
+
+  const selectOption = (option) => {
+    onChange(option)
+    closeMenu()
+  }
+
+  const handleKeyDown = (event) => {
+    if (event.nativeEvent.isComposing) return
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      if (!showMenu) {
+        setOpen(true)
+        setHighlighted(filtered.length ? 0 : -1)
+        return
+      }
+      if (!filtered.length) return
+      setHighlighted(prev => (prev < 0 || prev >= filtered.length - 1 ? 0 : prev + 1))
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      if (!showMenu) {
+        setOpen(true)
+        setHighlighted(filtered.length ? filtered.length - 1 : -1)
+        return
+      }
+      if (!filtered.length) return
+      setHighlighted(prev => (prev <= 0 ? filtered.length - 1 : prev - 1))
+    } else if (event.key === 'Enter') {
+      if (showMenu && activeIndex >= 0) {
+        event.preventDefault()
+        selectOption(filtered[activeIndex])
+      }
+    } else if (event.key === 'Escape') {
+      if (open) {
+        event.preventDefault()
+        closeMenu()
+      }
+    } else if (event.key === 'Tab') {
+      closeMenu()
+    }
+  }
+
+  return <div ref={wrapRef} style={{position:'relative', flex:'1 1 0', minWidth:0, display:'flex'}}>
+    <input
+      role="combobox"
+      aria-label={ariaLabel}
+      aria-autocomplete="list"
+      aria-expanded={showMenu}
+      aria-controls={listId}
+      aria-activedescendant={activeIndex >= 0 ? optionId(activeIndex) : undefined}
+      aria-haspopup="listbox"
+      autoComplete="off"
+      spellCheck={false}
+      placeholder={placeholder}
+      value={value}
+      onChange={event => { onChange(event.target.value); setOpen(true); setHighlighted(-1) }}
+      onFocus={() => setOpen(true)}
+      onClick={() => setOpen(true)}
+      onKeyDown={handleKeyDown}
+      onBlur={event => {
+        if (event.relatedTarget && !wrapRef.current?.contains(event.relatedTarget)) closeMenu()
+      }}
+      style={{width:'100%', minWidth:0, height:32, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 10px', fontSize:13, background:'#fff', color:'#24232d'}}
+    />
+    <div
+      id={listId}
+      ref={listRef}
+      role="listbox"
+      aria-label={`${ariaLabel} gợi ý`}
+      style={{position:'absolute', top:'calc(100% + 4px)', left:0, right:0, zIndex:20, display:showMenu ? 'block' : 'none', background:'#fff', border:'1px solid #e9e9ee', borderRadius:8, boxShadow:'0 8px 24px #0000001f', padding:4, maxHeight:240, overflowY:'auto', overflowX:'hidden', overscrollBehavior:'contain', scrollbarColor:'#c9c7d2 #fff', scrollbarWidth:'thin'}}
+    >
+      {showMenu && (filtered.length
+        ? filtered.map((option, index) => <div
+            key={option}
+            id={optionId(index)}
+            role="option"
+            aria-selected={index === activeIndex}
+            data-option-index={index}
+            onMouseDown={event => event.preventDefault()}
+            onMouseEnter={() => setHighlighted(index)}
+            onClick={() => selectOption(option)}
+            style={{padding:'7px 10px', borderRadius:7, fontSize:13, lineHeight:'18px', cursor:'pointer', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', userSelect:'none', color:index === activeIndex ? '#6558d6' : '#24232d', background:index === activeIndex ? '#f0eefc' : 'transparent', fontWeight:index === activeIndex ? 700 : 500}}
+          >{option}</div>)
+        : <div role="option" aria-disabled="true" onMouseDown={event => event.preventDefault()} style={{padding:'9px 10px', fontSize:12, color:'#8e8c96'}}>Không có gợi ý</div>)}
+    </div>
+  </div>
+}
+
 function ContentWarehousePage({ resolveStyleName }) {
   const desktop = isDesktop()
   const [items, setItems] = useState([])
@@ -1111,14 +1244,8 @@ function ContentWarehousePage({ resolveStyleName }) {
       <div><Zap size={18}/><span><b>{items.filter(i=>i.status==='approved').length}</b> đã duyệt</span></div>
       <div style={{flex:1, minWidth:0, display:'flex', gap:8, padding:0, border:'none', background:'transparent'}}>
         <input spellCheck={false} aria-label="Tìm theo tiêu đề hoặc nội dung" placeholder="Tiêu đề, nội dung" value={query} onChange={e=>setQuery(e.target.value)} style={{flex:'1 1 0', minWidth:0, height:32, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 10px', fontSize:13}}/>
-        <input spellCheck={false} aria-label="Tìm theo chủ đề" placeholder="Chủ đề" list="content-topic-suggestions" value={topicQuery} onChange={e=>setTopicQuery(e.target.value)} style={{flex:'1 1 0', minWidth:0, height:32, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 10px', fontSize:13}}/>
-        <input spellCheck={false} aria-label="Tìm theo style" placeholder="Style" list="content-style-suggestions" value={styleQuery} onChange={e=>setStyleQuery(e.target.value)} style={{flex:'1 1 0', minWidth:0, height:32, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 10px', fontSize:13}}/>
-        <datalist id="content-topic-suggestions">
-          {topicOptions.map(topic => <option key={topic} value={topic}/>)}
-        </datalist>
-        <datalist id="content-style-suggestions">
-          {styleOptions.map(style => <option key={style} value={style}/>)}
-        </datalist>
+        <SuggestInput ariaLabel="Tìm theo chủ đề" placeholder="Chủ đề" value={topicQuery} onChange={setTopicQuery} options={topicOptions}/>
+        <SuggestInput ariaLabel="Tìm theo style" placeholder="Style" value={styleQuery} onChange={setStyleQuery} options={styleOptions}/>
       </div>
     </div>
     <div style={{display:'flex', gap:8, marginBottom:14}}>
