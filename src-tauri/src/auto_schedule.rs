@@ -156,6 +156,10 @@ pub fn validate_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn normalize_style_value(styles: &[crate::styles::Style], value: &str) -> String {
+    crate::styles::resolve_style_name(styles, value).unwrap_or_else(|| value.trim().to_string())
+}
+
 pub fn validate_recurrence(recurrence: &Recurrence) -> Result<(), String> {
     match recurrence {
         Recurrence::FixedTimes { times } => {
@@ -217,6 +221,7 @@ pub fn create_auto_schedule(app: AppHandle, payload: CreateAutoSchedulePayload) 
     if payload.prompt.trim().is_empty() { return Err("Vui lòng nhập prompt".into()); }
     if payload.style.trim().is_empty() { return Err("Vui lòng chọn style".into()); }
     validate_recurrence(&payload.recurrence)?;
+    let styles = crate::styles::read_styles(&app).unwrap_or_default();
     let now = Utc::now();
     let item = AutoSchedule {
         id: uuid::Uuid::new_v4().to_string(),
@@ -224,7 +229,7 @@ pub fn create_auto_schedule(app: AppHandle, payload: CreateAutoSchedulePayload) 
         enabled: true,
         recurrence: payload.recurrence.clone(),
         prompt: payload.prompt.trim().to_string(),
-        style: payload.style.trim().to_string(),
+        style: normalize_style_value(&styles, &payload.style),
         custom_style: payload.custom_style.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
         style_content: payload.style_content,
         topic_lists: payload.topic_lists,
@@ -255,7 +260,8 @@ pub fn update_auto_schedule(app: AppHandle, id: String, payload: UpdateAutoSched
     }
     if let Some(s) = &payload.style {
         if s.trim().is_empty() { return Err("Vui lòng chọn style".into()); }
-        items[pos].style = s.trim().to_string();
+        let styles = crate::styles::read_styles(&app).unwrap_or_default();
+        items[pos].style = normalize_style_value(&styles, s);
     }
     if payload.custom_style.is_some() { items[pos].custom_style = payload.custom_style.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()); }
     if payload.style_content.is_some() { items[pos].style_content = payload.style_content; }
@@ -379,13 +385,15 @@ async fn process_due<R: Runtime>(app: &AppHandle<R>) -> Result<(), String> {
 
 async fn run_one<R: Runtime>(app: &AppHandle<R>, s: &AutoSchedule) -> Result<(), String> {
     let prompt_used = crate::ai::expand_prompt(&s.prompt, &s.topic_lists, chrono::Utc::now().timestamp() as u64)?;
-    let raw = crate::ai::call_ai_provider_with(app, &prompt_used, &s.style, s.custom_style.as_deref(), s.style_content.as_deref(), s.provider_id.as_deref(), s.model.as_deref()).await?;
+    let styles = crate::styles::read_styles(app).unwrap_or_default();
+    let style_name = normalize_style_value(&styles, &s.style);
+    let raw = crate::ai::call_ai_provider_with(app, &prompt_used, &style_name, s.custom_style.as_deref(), s.style_content.as_deref(), s.provider_id.as_deref(), s.model.as_deref()).await?;
     let (title, body) = crate::ai::parse_ai_response(&raw.content);
     let payload = crate::content::SaveContentPayload {
         title: title.clone(),
         body: body.clone(),
         prompt: s.prompt.clone(),
-        style: s.style.clone(),
+        style: style_name,
         topic: None,
         custom_style: s.custom_style.clone(),
         media_ids: None,
@@ -400,6 +408,7 @@ async fn run_one<R: Runtime>(app: &AppHandle<R>, s: &AutoSchedule) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::styles::Style;
     use chrono::Timelike;
     // tests minimal: compute_next_run etc.
     #[test]
@@ -431,5 +440,38 @@ mod tests {
     fn test_auto_scheduler_config_validation() {
         // just logic
         assert!(!(1u64 < 1 || 1u64 > 3600));
+    }
+    #[test]
+    fn test_normalize_style_value_maps_id_to_name() {
+        let styles = vec![Style {
+            id: "viral".into(),
+            name: "Viral".into(),
+            content: "x".into(),
+            builtin: true,
+        }];
+        assert_eq!(normalize_style_value(&styles, "viral"), "Viral");
+    }
+    #[test]
+    fn test_normalize_style_value_maps_name_case_insensitively() {
+        let styles = vec![Style {
+            id: "uuid-1".into(),
+            name: "Phong Cách A".into(),
+            content: "x".into(),
+            builtin: false,
+        }];
+        assert_eq!(normalize_style_value(&styles, "  phong cách a "), "Phong Cách A");
+    }
+    #[test]
+    fn test_normalize_style_value_keeps_unknown_raw() {
+        let styles: Vec<Style> = Vec::new();
+        assert_eq!(
+            normalize_style_value(&styles, "0c068259-4ac5-470b-8d2f-2f7e22c0814e"),
+            "0c068259-4ac5-470b-8d2f-2f7e22c0814e"
+        );
+    }
+    #[test]
+    fn test_normalize_style_value_trims_unknown_raw() {
+        let styles: Vec<Style> = Vec::new();
+        assert_eq!(normalize_style_value(&styles, "  unknown-id  "), "unknown-id");
     }
 }

@@ -1019,7 +1019,13 @@ function PublishModal({ onClose, onSuccess }) {
 const CONTENT_STATUS_LABELS = { draft: 'Nháp', approved: 'Đã duyệt', archived: 'Lưu trữ' }
 const contentStatusLabel = (s) => CONTENT_STATUS_LABELS[s] || s
 
-function ContentWarehousePage() {
+const resolveStyleLabel = (styles, value) => {
+  const raw = value == null ? '' : String(value)
+  const match = (styles || []).find(s => s.id === raw)
+  return match ? match.name : raw
+}
+
+function ContentWarehousePage({ resolveStyleName }) {
   const desktop = isDesktop()
   const [items, setItems] = useState([])
   const [filter, setFilter] = useState('all')
@@ -1074,7 +1080,7 @@ function ContentWarehousePage() {
     </div>
     {filtered.length ? <div style={{display:'grid', gridTemplateColumns:'repeat(2,1fr)', gap:14}}>{filtered.map(it => <article key={it.id} className="panel" style={{padding:14, display:'flex', flexDirection:'column', gap:8}}>
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-        <span style={{fontSize:12, fontWeight:800, color: it.style==='Custom' ? '#d87642' : '#6558d6', background: it.style==='Custom' ? '#fff0e6' : '#f0eefc', padding:'3px 7px', borderRadius:10}}>{it.style}{it.customStyle ? `:${it.customStyle}` : ''}</span>
+        <span style={{fontSize:12, fontWeight:800, color: it.style==='Custom' ? '#d87642' : '#6558d6', background: it.style==='Custom' ? '#fff0e6' : '#f0eefc', padding:'3px 7px', borderRadius:10}}>{resolveStyleName(it.style)}{it.customStyle ? `:${it.customStyle}` : ''}</span>
         <span style={{fontSize:12, color: it.status==='approved' ? '#2e7d32' : '#777', background: it.status==='approved' ? '#e8f5e9' : '#f5f5f5', padding:'3px 7px', borderRadius:10}}>{contentStatusLabel(it.status)}</span>
       </div>
       <strong style={{fontSize:14, lineHeight:1.4}}>{it.title}</strong>
@@ -1106,7 +1112,7 @@ function ContentWarehousePage() {
                 await invokeDesktop('update_content', {
                   payload: {
                     contentId: editing.id, title: editing.title, body: editing.body,
-                    prompt: editing.prompt, style: editing.style, customStyle: editing.customStyle || null,
+                    prompt: editing.prompt, style: resolveStyleName(editing.style), customStyle: editing.customStyle || null,
                     mediaIds: editing.mediaIds || [], topic: editing.topic || null
                   }
                 })
@@ -1272,7 +1278,7 @@ function SchedulePage() {
   </section>
 }
 
-function DashboardSchedulePanel({ onViewAll }) {
+function DashboardSchedulePanel({ onViewAll, resolveStyleName }) {
   const desktop = isDesktop()
   const [todaySchedules, setTodaySchedules] = useState([])
   const [contentMap, setContentMap] = useState(new Map())
@@ -1298,7 +1304,7 @@ function DashboardSchedulePanel({ onViewAll }) {
     <div className="timeline">
       {todaySchedules.length ? todaySchedules.map(s => {
         const c = contentMap.get(s.contentId)
-        return <div className="task" key={s.id}><time>{formatTime(s.scheduledAt)}</time><i className={`dot ${dotColor(s.platform)}`}/><div><strong>{c ? c.title.slice(0,28) : s.contentId.slice(0,8)}</strong><span>{s.platform} • {c ? c.style : s.contentId}</span><small><Send size={12}/> Đã lên lịch</small></div></div>
+        return <div className="task" key={s.id}><time>{formatTime(s.scheduledAt)}</time><i className={`dot ${dotColor(s.platform)}`}/><div><strong>{c ? c.title.slice(0,28) : s.contentId.slice(0,8)}</strong><span>{s.platform} • {c ? resolveStyleName(c.style) : s.contentId}</span><small><Send size={12}/> Đã lên lịch</small></div></div>
       }) : <>
         <div className="task"><time>10:00</time><i className="dot purple-dot"/><div><strong>Chưa có lịch hôm nay</strong><span>Hãy tạo lịch từ Kho nội dung</span><small><CalendarDays size={12}/> Trống</small></div></div>
       </>}
@@ -1320,10 +1326,21 @@ function App() {
   const [dashboardTotalInteractions, setDashboardTotalInteractions] = useState('—')
   const [dashboardTotalSub, setDashboardTotalSub] = useState('chờ Graph insights')
   const [dashboardEngagementRate, setDashboardEngagementRate] = useState('—')
+  const [styleList, setStyleList] = useState([])
   const [hoveredRecent, setHoveredRecent] = useState(null)
   const desktop = isDesktop()
   const today = new Intl.DateTimeFormat('vi-VN', { weekday: 'long', day: '2-digit', month: 'long' }).format(new Date())
   const createPost = () => { setActive('AI Content'); setToast(true); setTimeout(() => setToast(false), 2600) }
+  const resolveStyleName = (value) => resolveStyleLabel(styleList, value)
+
+  useEffect(() => {
+    if (!desktop) return
+    let cancelled = false
+    invokeDesktop('list_styles')
+      .then(list => { if (!cancelled) setStyleList(Array.isArray(list) ? list : []) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [desktop])
 
   useEffect(() => {
     if (!desktop) return
@@ -1332,10 +1349,13 @@ function App() {
         const [contents, schedules] = await Promise.all([invokeDesktop('list_content'), invokeDesktop('list_schedule')])
         setContentCount(contents.length)
         // Recent posts: 3 mới nhất từ content (fallback khi chưa có insights)
-        let recent = [...contents].sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt)).slice(0,3).map((c,i) => ({
-          title: c.title, page: c.style, date: new Date(c.createdAt).toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}),
-          type: c.mediaIds && c.mediaIds.length ? 'Ảnh + văn bản' : 'Văn bản', status: contentStatusLabel(c.status), color: ['#f0a86e','#7469d5','#4b9b7d'][i%3], initials: c.style.slice(0,2).toUpperCase(), reach: '—', likes: '—', comments: '—', pending: c.status !== 'approved', tooltip: '', tooltipData: { impressions:'—', unique:'—', engaged:'—', clicks:'—', reactions:'—', videoViews:'—' }
-        }))
+        let recent = [...contents].sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt)).slice(0,3).map((c,i) => {
+          const styleLabel = resolveStyleLabel(styleList, c.style)
+          return {
+            title: c.title, page: styleLabel, date: new Date(c.createdAt).toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}),
+            type: c.mediaIds && c.mediaIds.length ? 'Ảnh + văn bản' : 'Văn bản', status: contentStatusLabel(c.status), color: ['#f0a86e','#7469d5','#4b9b7d'][i%3], initials: styleLabel.slice(0,2).toUpperCase(), reach: '—', likes: '—', comments: '—', pending: c.status !== 'approved', tooltip: '', tooltipData: { impressions:'—', unique:'—', engaged:'—', clicks:'—', reactions:'—', videoViews:'—' }
+          }
+        })
         setDashboardRecent(recent)
         setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights'); setDashboardEngagementRate('—')
         // Thử lấy toàn bộ 6 metrics thật từ Graph API (post_impressions, post_impressions_unique, post_engaged_users, post_clicks, post_reactions_by_type_total, post_video_views)
@@ -1416,7 +1436,7 @@ function App() {
     load()
     const id = setInterval(load, 4000)
     return () => clearInterval(id)
-  }, [desktop, active])
+  }, [desktop, active, styleList])
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -1432,7 +1452,7 @@ function App() {
     <main>
       <header><div className="search"><Search size={18}/><input spellCheck={false} aria-label="Tìm kiếm" placeholder="Tìm kiếm nội dung, bài viết..." disabled style={{opacity:0.6}}/></div><div className="head-actions"><button className="primary" onClick={createPost}><Plus size={19}/> Tạo nội dung mới</button></div></header>
       <div className="content">
-        {active === 'AI Content' ? <AiContentPage/> : active === 'Kho nội dung' ? <ContentWarehousePage/> : active === 'Thư viện media' ? <MediaLibrary/> : active === 'Lịch đăng bài' ? <SchedulePage/> : active === 'Lịch AI content' ? <AutoSchedulePage desktop={desktop} /> : active === 'Cài đặt' ? <SettingsPage/> : <>
+        {active === 'AI Content' ? <AiContentPage/> : active === 'Kho nội dung' ? <ContentWarehousePage resolveStyleName={resolveStyleName}/> : active === 'Thư viện media' ? <MediaLibrary/> : active === 'Lịch đăng bài' ? <SchedulePage/> : active === 'Lịch AI content' ? <AutoSchedulePage desktop={desktop} /> : active === 'Cài đặt' ? <SettingsPage/> : <>
         <section className="welcome"><div><p>{today}</p><h1>{getGreeting()}</h1><div className="welcome-sub">Hôm nay bạn có <b>{dashboardScheduled} bài viết</b> đang chờ được đăng.</div></div><button className="outline" onClick={()=>setActive('Lịch đăng bài')}><CalendarDays size={17}/> Xem lịch đăng bài</button></section>
 
         <section className="stats-grid">
@@ -1448,7 +1468,7 @@ function App() {
             <div className="chart-total"><strong>{dashboardChartData.reduce((s,c)=>s+c.engagement,0)}</strong><span> bài</span></div>
             <div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><AreaChart data={dashboardChartData.length ? dashboardChartData : [{day:'T2',posts:0,engagement:0},{day:'T3',posts:0,engagement:0},{day:'T4',posts:0,engagement:0},{day:'T5',posts:0,engagement:0},{day:'T6',posts:0,engagement:0},{day:'T7',posts:0,engagement:0},{day:'CN',posts:0,engagement:0}]} margin={{top: 8, right: 8, left: -20, bottom: 0}}><defs><linearGradient id="colorEng" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#6558d6" stopOpacity={0.25}/><stop offset="95%" stopColor="#6558d6" stopOpacity={0}/></linearGradient></defs><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ececf2"/><XAxis dataKey="day" axisLine={false} tickLine={false} tick={{fill:'#8c8b98', fontSize:14}}/><YAxis axisLine={false} tickLine={false} tick={{fill:'#aaa9b3', fontSize:13}}/><Tooltip contentStyle={{border:'none', borderRadius:10, boxShadow:'0 8px 30px #2222'}}/><Area type="monotone" dataKey="engagement" stroke="#6558d6" strokeWidth={2.5} fill="url(#colorEng)"/></AreaChart></ResponsiveContainer></div>
           </div>
-          <DashboardSchedulePanel onViewAll={()=>setActive('Lịch đăng bài')} />
+          <DashboardSchedulePanel onViewAll={()=>setActive('Lịch đăng bài')} resolveStyleName={resolveStyleName} />
         </section>
 
         <section className="panel recent">
@@ -1492,7 +1512,7 @@ function AutoSchedulePage({ desktop }) {
       setConfig({ intervalSeconds: cfg.intervalSeconds, enabled: cfg.enabled })
       setStyles(st || [])
       setProviders(pv || [])
-      if (!form.style && st && st.length) setForm(f => ({ ...f, style: st[0].id || st[0].name }))
+      if (!form.style && st && st.length) setForm(f => ({ ...f, style: st[0].name || st[0].id }))
       setErr('')
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
@@ -1526,7 +1546,7 @@ function AutoSchedulePage({ desktop }) {
 
   const openCreate = () => {
     setEditing(null)
-    setForm({ name: '', recurrenceType: 'fixed', fixedTimes: '08:00', intervalMinutes: 10, prompt: '', style: styles.length ? (styles[0].id || styles[0].name) : '', providerId: '', model: '', autoApprove: false, enabled: true })
+    setForm({ name: '', recurrenceType: 'fixed', fixedTimes: '08:00', intervalMinutes: 10, prompt: '', style: styles.length ? (styles[0].name || styles[0].id) : '', providerId: '', model: '', autoApprove: false, enabled: true })
     setShowModal(true); setErr(''); setMsg('')
   }
   const openEdit = (item) => {
@@ -1538,7 +1558,7 @@ function AutoSchedulePage({ desktop }) {
       fixedTimes: rec.kind === 'fixed' ? rec.times.join(', ') : '08:00',
       intervalMinutes: rec.kind === 'interval' ? rec.minutes : 10,
       prompt: item.prompt,
-      style: item.style,
+      style: resolveStyleLabel(styles, item.style),
       providerId: item.providerId || '',
       model: item.model || '',
       autoApprove: !!item.autoApprove,
@@ -1649,7 +1669,7 @@ function AutoSchedulePage({ desktop }) {
         </label>
         <label style={{fontSize:13}}>Style
           <select value={form.style} onChange={e=>setForm(f=>({...f, style: e.target.value}))} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:4}}>
-            {styles.map(s => <option key={s.id || s.name} value={s.id || s.name}>{s.name || s.id}</option>)}
+            {styles.map(s => <option key={s.id || s.name} value={s.name || s.id}>{s.name || s.id}</option>)}
           </select>
         </label>
         <label style={{fontSize:13}}>Provider (tùy chọn)

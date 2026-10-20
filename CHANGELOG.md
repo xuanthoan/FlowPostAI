@@ -2,6 +2,20 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-20 — Sửa nhãn style hiển thị id thay vì tên
+
+### Fixed
+- `src/App.jsx` — pill style ở Kho nội dung, phụ đề Lịch sắp tới và cột trang ở Tổng quan hiển thị tên style; giá trị id được quy đổi sang tên, giá trị không khớp giữ nguyên.
+- `src/App.jsx` — lịch AI lưu tên style thay vì id (mặc định, dropdown, khi mở sửa) và khi sửa bài trong Kho nội dung sẽ ghi lại tên style.
+- `src-tauri/src/styles.rs` — thêm hàm thuần `resolve_style_name` và `read_styles`; `list_styles` giữ nguyên chữ ký lệnh.
+- `src-tauri/src/auto_schedule.rs` — chuẩn hoá id sang tên khi tạo/cập nhật lịch và trong `run_one` trước khi gọi AI và lưu content; đọc style lỗi thì giữ nguyên giá trị gốc.
+
+### Verified
+- `cargo test --lib` — 210 passed, 0 failed (+9 test mới).
+- `cargo check` — exit 0, 7 warning có sẵn từ trước.
+- `npm run build` — exit 0.
+- `npm run lint` — exit 0 trong phiên implement (QA reviewer bị sandbox chặn lệnh này).
+
 ## [Unreleased] - 2026-10-20 — Sắp xếp lại sidebar, đổi tên Lịch AI content và Lịch đăng bài
 
 ### Changed

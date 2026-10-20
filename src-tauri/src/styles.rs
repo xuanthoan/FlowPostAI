@@ -269,6 +269,24 @@ fn read_styles_at(path: &Path) -> Result<StylesFile, String> {
     Ok(file)
 }
 
+/// Resolve a stored style value to the canonical style name.
+/// Matches by id first (trimmed, exact), then by name (trimmed, case-insensitive).
+pub fn resolve_style_name(styles: &[Style], value: &str) -> Option<String> {
+    let needle = value.trim();
+    if needle.is_empty() { return None; }
+    if let Some(by_id) = styles.iter().find(|s| s.id.as_str() == needle) {
+        return Some(by_id.name.clone());
+    }
+    let needle_lower = needle.to_lowercase();
+    styles.iter().find(|s| s.name.trim().to_lowercase() == needle_lower).map(|s| s.name.clone())
+}
+
+pub fn read_styles<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<Style>, String> {
+    let path = styles_path(app)?;
+    let file = read_styles_at(&path)?;
+    Ok(file.styles)
+}
+
 // --- Commands ---
 
 #[derive(Deserialize)]
@@ -288,9 +306,7 @@ pub struct UpdateStylePayload {
 
 #[tauri::command]
 pub fn list_styles<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Style>, String> {
-    let path = styles_path(&app)?;
-    let file = read_styles_at(&path)?;
-    Ok(file.styles)
+    read_styles(&app)
 }
 
 #[tauri::command]
@@ -612,5 +628,60 @@ mod tests {
             assert!(!s.content.contains(mojibake_marker), "style {} content looks mojibaked", s.id);
             assert!(!s.name.contains(mojibake_marker), "style {} name looks mojibaked", s.id);
         }
+    }
+
+    #[test]
+    fn test_resolve_style_name_by_id() {
+        let styles = default_styles().styles;
+        assert_eq!(resolve_style_name(&styles, "viral"), Some("Viral".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_style_name_by_name_case_insensitive_and_trimmed() {
+        let styles = vec![Style {
+            id: "uuid-1".into(),
+            name: "Phong Cách A".into(),
+            content: "x".into(),
+            builtin: false,
+        }];
+        assert_eq!(
+            resolve_style_name(&styles, "  phong cách a  "),
+            Some("Phong Cách A".to_string())
+        );
+    }
+
+    #[test]
+    fn test_resolve_style_name_id_wins_over_name() {
+        let styles = vec![
+            Style {
+                id: "dup".into(),
+                name: "First".into(),
+                content: "x".into(),
+                builtin: false,
+            },
+            Style {
+                id: "other".into(),
+                name: "dup".into(),
+                content: "y".into(),
+                builtin: false,
+            },
+        ];
+        assert_eq!(resolve_style_name(&styles, "dup"), Some("First".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_style_name_unknown_returns_none() {
+        let styles = default_styles().styles;
+        assert_eq!(
+            resolve_style_name(&styles, "0c068259-4ac5-470b-8d2f-2f7e22c0814e"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_resolve_style_name_empty_returns_none() {
+        let styles = default_styles().styles;
+        assert_eq!(resolve_style_name(&styles, ""), None);
+        assert_eq!(resolve_style_name(&styles, "   "), None);
     }
 }
