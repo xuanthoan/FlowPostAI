@@ -2,6 +2,16 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-20 — Kho nội dung: giới hạn tiêu đề dài trong list
+
+### Changed
+- `src/App.jsx` — tiêu đề item trong list Kho nội dung được clamp tối đa 2 dòng, chống tràn ngang với từ dài, và có tooltip chứa tiêu đề đầy đủ.
+- `src/App.jsx` — item không có tiêu đề hiển thị `Chưa có tiêu đề` thay vì một dòng trống.
+
+### Verified
+- `npm run build` — exit 0.
+- `npm run lint` — exit 0 trong phiên implement (QA reviewer bị sandbox chặn lệnh này).
+
 ## [Unreleased] - 2026-10-20 — Kho nội dung: preview ngắn và bố cục dạng list
 
 ### Changed

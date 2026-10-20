@@ -1093,7 +1093,7 @@ function ContentWarehousePage({ resolveStyleName }) {
           <span style={{fontSize:12, fontWeight:800, color: it.style==='Custom' ? '#d87642' : '#6558d6', background: it.style==='Custom' ? '#fff0e6' : '#f0eefc', padding:'3px 7px', borderRadius:10}}>{resolveStyleName(it.style)}{it.customStyle ? `:${it.customStyle}` : ''}</span>
           <span style={{fontSize:12, color: it.status==='approved' ? '#2e7d32' : '#777', background: it.status==='approved' ? '#e8f5e9' : '#f5f5f5', padding:'3px 7px', borderRadius:10}}>{contentStatusLabel(it.status)}</span>
         </div>
-        <strong style={{fontSize:14, lineHeight:1.4}}>{it.title}</strong>
+        <strong title={it.title?.trim() ? it.title : undefined} style={{fontSize:14, lineHeight:1.4, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden', whiteSpace:'pre-line', wordBreak:'break-word'}}>{it.title?.trim() ? it.title : 'Chưa có tiêu đề'}</strong>
         <span style={{fontSize:13, color:'#555', display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden', whiteSpace:'pre-line', wordBreak:'break-word'}}>{previewText(it.body, CONTENT_PREVIEW_LIMITS.body)}</span>
         <div style={{display:'flex', alignItems:'center', minWidth:0, fontSize:12, color:'#888', whiteSpace:'nowrap'}}>
           <span style={{flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{it.topic ? `Chủ đề: ${previewText(it.topic, CONTENT_PREVIEW_LIMITS.topic)} • ` : ''}Prompt: {previewText(it.prompt, CONTENT_PREVIEW_LIMITS.prompt)}</span>
