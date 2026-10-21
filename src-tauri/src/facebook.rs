@@ -466,16 +466,6 @@ pub async fn publish_content_classified_multi<R: Runtime>(
     .await
 }
 
-pub async fn publish_content_classified<R: Runtime>(
-    app: AppHandle<R>,
-    page_id: String,
-    message: String,
-    image_path: Option<String>,
-) -> Result<serde_json::Value, GraphFailure> {
-    let image_paths: Vec<String> = image_path.into_iter().collect();
-    publish_content_classified_multi(app, page_id, message, image_paths).await
-}
-
 /// Kiểm tra và dựng phần `source` dùng chung cho cả bài 1 ảnh và ảnh chưa
 /// công bố (multi-photo). Thứ tự kiểm tra giữ nguyên như bản cũ.
 async fn photo_part(path: &str) -> Result<reqwest::multipart::Part, GraphFailure> {
