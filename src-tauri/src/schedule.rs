@@ -209,6 +209,14 @@ pub fn create_schedule(app: AppHandle, payload: CreateSchedulePayload) -> Result
     if payload.platform.trim().is_empty() {
         return Err("Vui lòng chọn nền tảng".into());
     }
+    if let Some(page_id) = payload.page_id.as_deref() {
+        crate::facebook::validate_page_id(page_id)?;
+    }
+    if let Some(pages) = payload.pages.as_ref() {
+        for page in pages {
+            crate::facebook::validate_page_id(page)?;
+        }
+    }
     let now = Utc::now();
     // Must be at least 5 minutes in future
     if payload.scheduled_at <= now + chrono::Duration::minutes(5) {

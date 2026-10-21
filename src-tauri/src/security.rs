@@ -96,36 +96,65 @@ pub fn set_secret_hybrid<R: Runtime>(app: Option<&AppHandle<R>>, key: &str, valu
     if value.trim().is_empty() {
         return delete_secret_hybrid(app, key);
     }
-    // Try keyring first (best effort)
+    // Keyring là nơi lưu chính. Fallback plaintext chỉ ghi khi keyring thất bại.
     let keyring_ok = match entry_for(key) {
         Ok(e) => e.set_password(value).is_ok(),
         Err(_) => false,
     };
-    // Always also write to fallback if app available, or consider it success if keyring succeeded
-    if let Some(a) = app {
-        // If keyring succeeded, we still write fallback as backup for cross-Entry bug
-        set_fallback(a, key, value)?;
-        if keyring_ok {
-            return Ok(());
+    if keyring_ok {
+        // Keyring đã có giá trị mới: xóa bản sao plaintext cũ (best-effort).
+        if let Some(a) = app {
+            let _ = delete_fallback(a, key);
         }
-        // If keyring failed, fallback already written
         return Ok(());
     }
-    if keyring_ok {
-        Ok(())
-    } else {
-        Err("No app handle for fallback and keyring failed".into())
+    if let Some(a) = app {
+        set_fallback(a, key, value)?;
+        return Ok(());
     }
+    Err("No app handle for fallback and keyring failed".into())
+}
+
+/// Giá trị keyring trùng với fallback nghĩa là fallback chỉ còn là bản sao cũ
+/// và có thể xóa sau khi đọc thành công từ keyring.
+fn should_scrub_fallback(keyring_value: &str, fallback_value: &str) -> bool {
+    keyring_value == fallback_value
 }
 
 pub fn get_secret_hybrid<R: Runtime>(app: Option<&AppHandle<R>>, key: &str) -> Result<Option<String>, String> {
     // Try keyring first
-    if let Ok(entry) = entry_for(key) {
-        match entry.get_password() {
-            Ok(v) => return Ok(Some(v)),
-            Err(keyring::Error::NoEntry) => {} // fallthrough to fallback
+    match entry_for(key) {
+        Ok(entry) => match entry.get_password() {
+            Ok(value) => {
+                // Lazy migration: fallback trùng giá trị keyring thì xóa,
+                // khác giá trị thì giữ nguyên (không ghi đè keyring).
+                if let Some(a) = app {
+                    if let Ok(Some(fallback_value)) = get_fallback(a, key) {
+                        if should_scrub_fallback(&value, &fallback_value) {
+                            let _ = delete_fallback(a, key);
+                        }
+                    }
+                }
+                Ok(Some(value))
+            }
+            Err(keyring::Error::NoEntry) => {
+                let Some(a) = app else {
+                    return Ok(None);
+                };
+                let Some(value) = get_fallback(a, key)? else {
+                    return Ok(None);
+                };
+                // Fallback còn giá trị: thử migrate sang keyring rồi xóa fallback.
+                let migrated = entry_for(key)
+                    .map(|e| e.set_password(&value).is_ok())
+                    .unwrap_or(false);
+                if migrated {
+                    let _ = delete_fallback(a, key);
+                }
+                Ok(Some(value))
+            }
             Err(e) => {
-                // Platform failure -> try fallback if available
+                // Platform failure -> try fallback if available, không migrate.
                 if let Some(a) = app {
                     if let Ok(v) = get_fallback(a, key) {
                         if v.is_some() {
@@ -133,14 +162,17 @@ pub fn get_secret_hybrid<R: Runtime>(app: Option<&AppHandle<R>>, key: &str) -> R
                         }
                     }
                 }
-                return Err(e.to_string());
+                Err(e.to_string())
             }
+        },
+        Err(_) => {
+            // Không tạo được Entry (keyring không dùng được) -> fallback.
+            if let Some(a) = app {
+                return get_fallback(a, key);
+            }
+            Ok(None)
         }
     }
-    if let Some(a) = app {
-        return get_fallback(a, key);
-    }
-    Ok(None)
 }
 
 pub fn delete_secret_hybrid<R: Runtime>(app: Option<&AppHandle<R>>, key: &str) -> Result<(), String> {
@@ -194,11 +226,6 @@ pub struct CredentialStatus {
 #[tauri::command]
 pub fn set_facebook_token(app: AppHandle, token: String) -> Result<(), String> {
     set_secret_hybrid(Some(&app), FB_KEY, &token)
-}
-
-#[tauri::command]
-pub fn get_facebook_token(app: AppHandle) -> Result<Option<String>, String> {
-    get_secret_hybrid(Some(&app), FB_KEY)
 }
 
 #[tauri::command]
@@ -302,5 +329,17 @@ mod tests {
         assert_eq!(get_fallback_at(&dir, fb_key).unwrap(), None);
         assert_eq!(get_fallback_at(&dir, ai_provider_key).unwrap(), Some("ai_provider_secret".into()));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_should_scrub_fallback_when_values_match() {
+        assert!(should_scrub_fallback("same-secret", "same-secret"));
+        assert!(should_scrub_fallback("", ""));
+    }
+
+    #[test]
+    fn test_should_not_scrub_fallback_when_values_differ() {
+        assert!(!should_scrub_fallback("keyring-value", "fallback-value"));
+        assert!(!should_scrub_fallback("keyring-value", ""));
     }
 }

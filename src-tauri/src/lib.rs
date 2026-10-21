@@ -378,7 +378,6 @@ pub fn run() {
             delete_media,
             media_location,
             security::set_facebook_token,
-            security::get_facebook_token,
             security::delete_facebook_token,
             security::credential_status,
             providers::list_providers,
