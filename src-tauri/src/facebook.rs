@@ -32,11 +32,102 @@ struct GraphErrorResponse {
 struct GraphError {
     message: String,
     #[serde(rename = "type")]
-    #[allow(dead_code)]
     error_type: Option<String>,
     code: Option<i32>,
     #[allow(dead_code)]
     error_subcode: Option<i32>,
+}
+
+/// Phân loại lỗi Graph API để scheduler quyết định retry / dừng / bỏ.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GraphFailureKind {
+    TokenInvalid,
+    RateLimited,
+    InvalidParam,
+    Network,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphFailure {
+    pub kind: GraphFailureKind,
+    pub http_status: u16,
+    pub code: Option<i32>,
+    pub retry_after_secs: Option<u64>,
+    pub message: String,
+}
+
+impl std::fmt::Display for GraphFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl GraphFailure {
+    pub fn local(kind: GraphFailureKind, message: String) -> Self {
+        Self {
+            kind,
+            http_status: 0,
+            code: None,
+            retry_after_secs: None,
+            message,
+        }
+    }
+}
+
+/// Pure classifier: không phụ thuộc network, dùng được trong unit test.
+pub fn classify_graph_error(
+    status: u16,
+    code: Option<i32>,
+    error_type: Option<&str>,
+    message: String,
+    retry_after_secs: Option<u64>,
+) -> GraphFailure {
+    let kind = if status == 401 || code == Some(190) {
+        GraphFailureKind::TokenInvalid
+    } else if status == 429 || matches!(code, Some(4) | Some(32) | Some(613) | Some(368)) {
+        GraphFailureKind::RateLimited
+    } else if code == Some(100)
+        || code == Some(2)
+        || (error_type == Some("OAuthException")
+            && matches!(code, Some(c) if (200..=299).contains(&c)))
+    {
+        GraphFailureKind::InvalidParam
+    } else {
+        GraphFailureKind::Other
+    };
+    GraphFailure {
+        kind,
+        http_status: status,
+        code,
+        retry_after_secs,
+        message,
+    }
+}
+
+/// Đọc Retry-After dạng số giây. HTTP-date hoặc giá trị rác → None.
+fn graph_failure_from_response(
+    status: u16,
+    headers: &reqwest::header::HeaderMap,
+    body: &str,
+) -> GraphFailure {
+    let parsed = serde_json::from_str::<GraphErrorResponse>(body).ok();
+    let (code, error_type) = match parsed {
+        Some(err) => (err.error.code, err.error.error_type),
+        None => (None, None),
+    };
+    let retry_after_secs = headers
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok());
+    let message = map_graph_error(status, body);
+    classify_graph_error(
+        status,
+        code,
+        error_type.as_deref(),
+        message,
+        retry_after_secs,
+    )
 }
 
 fn graph_base() -> String {
@@ -194,22 +285,29 @@ fn validate_message_length(message: &str) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
-pub async fn publish_content<R: Runtime>(
+pub async fn publish_content_classified<R: Runtime>(
     app: AppHandle<R>,
     page_id: String,
     message: String,
     image_path: Option<String>,
-) -> Result<serde_json::Value, String> {
+) -> Result<serde_json::Value, GraphFailure> {
     if page_id.trim().is_empty() {
-        return Err("Thiếu pageId".into());
+        return Err(GraphFailure::local(
+            GraphFailureKind::InvalidParam,
+            "Thiếu pageId".to_string(),
+        ));
     }
     if message.trim().is_empty() {
-        return Err("Vui lòng nhập nội dung".into());
+        return Err(GraphFailure::local(
+            GraphFailureKind::InvalidParam,
+            "Vui lòng nhập nội dung".to_string(),
+        ));
     }
     // Validate length before resolving token / any network call, so a too-long
     // post fails fast. The cfg!(test) mock below also enforces this.
-    validate_message_length(&message)?;
+    if let Err(e) = validate_message_length(&message) {
+        return Err(GraphFailure::local(GraphFailureKind::InvalidParam, e));
+    }
     // Resolve token: ưu tiên Page token đã cache, fallback User token
     let access_token = crate::security::get_secret_hybrid(Some(&app), &page_token_key(&page_id))
         .ok()
@@ -219,9 +317,17 @@ pub async fn publish_content<R: Runtime>(
                 .ok()
                 .flatten()
         })
-        .ok_or("Không tìm thấy Page/User token, vui lòng Tải Trang lại".to_string())?;
+        .ok_or_else(|| {
+            GraphFailure::local(
+                GraphFailureKind::TokenInvalid,
+                "Không tìm thấy Page/User token, vui lòng Tải Trang lại".to_string(),
+            )
+        })?;
     if access_token.trim().is_empty() {
-        return Err("Không tìm thấy Page/User token, vui lòng Tải Trang lại".into());
+        return Err(GraphFailure::local(
+            GraphFailureKind::TokenInvalid,
+            "Không tìm thấy Page/User token, vui lòng Tải Trang lại".to_string(),
+        ));
     }
     if cfg!(test) {
         return Ok(serde_json::json!({"id":"mock_photo_123"}));
@@ -229,25 +335,37 @@ pub async fn publish_content<R: Runtime>(
     if let Some(path) = image_path {
         let p = std::path::Path::new(&path);
         if !p.exists() {
-            return Err("Không tìm thấy tệp ảnh".into());
+            return Err(GraphFailure::local(
+                GraphFailureKind::InvalidParam,
+                "Không tìm thấy tệp ảnh".to_string(),
+            ));
         }
-        let meta = std::fs::metadata(p).map_err(|e| e.to_string())?;
+        let meta = std::fs::metadata(p)
+            .map_err(|e| GraphFailure::local(GraphFailureKind::InvalidParam, e.to_string()))?;
         if meta.len() > 10 * 1024 * 1024 {
-            return Err("Ảnh vượt quá 10MB".into());
+            return Err(GraphFailure::local(
+                GraphFailureKind::InvalidParam,
+                "Ảnh vượt quá 10MB".to_string(),
+            ));
         }
         let mime = mime_guess::from_path(p).first_or_octet_stream().to_string();
         if !["image/jpeg", "image/png", "image/webp", "image/gif"].contains(&mime.as_str()) {
-            return Err("Định dạng ảnh không hỗ trợ (chỉ jpg/jpeg/png/webp/gif)".into());
+            return Err(GraphFailure::local(
+                GraphFailureKind::InvalidParam,
+                "Định dạng ảnh không hỗ trợ (chỉ jpg/jpeg/png/webp/gif)".to_string(),
+            ));
         }
         if cfg!(test) {
             return Ok(serde_json::json!({"id":"mock_photo_123"}));
         }
-        let bytes = tokio::fs::read(p).await.map_err(|e| e.to_string())?;
+        let bytes = tokio::fs::read(p)
+            .await
+            .map_err(|e| GraphFailure::local(GraphFailureKind::InvalidParam, e.to_string()))?;
         let file_name = p.file_name().unwrap().to_string_lossy().to_string();
         let part = reqwest::multipart::Part::bytes(bytes)
             .file_name(file_name)
             .mime_str(&mime)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| GraphFailure::local(GraphFailureKind::InvalidParam, e.to_string()))?;
         let form = reqwest::multipart::Form::new()
             .part("source", part)
             .text("message", message.clone())
@@ -256,41 +374,81 @@ pub async fn publish_content<R: Runtime>(
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| GraphFailure::local(GraphFailureKind::Network, e.to_string()))?;
         let resp = client
             .post(&url)
             .multipart(form)
             .send()
             .await
-            .map_err(|e| format!("Không thể kết nối Graph API: {}", e))?;
+            .map_err(|e| {
+                GraphFailure::local(
+                    GraphFailureKind::Network,
+                    format!("Không thể kết nối Graph API: {}", e),
+                )
+            })?;
         let status = resp.status().as_u16();
-        let body = resp.text().await.map_err(|e| e.to_string())?;
+        let headers = resp.headers().clone();
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| GraphFailure::local(GraphFailureKind::Network, e.to_string()))?;
         if status >= 200 && status < 300 {
-            serde_json::from_str::<serde_json::Value>(&body).map_err(|_| "Không parse được phản hồi".into())
+            serde_json::from_str::<serde_json::Value>(&body).map_err(|_| {
+                GraphFailure::local(
+                    GraphFailureKind::Other,
+                    "Không parse được phản hồi".to_string(),
+                )
+            })
         } else {
-            Err(map_graph_error(status, &body))
+            Err(graph_failure_from_response(status, &headers, &body))
         }
     } else {
         let url = format!("{}/{}/feed", graph_base(), page_id.trim());
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(15))
             .build()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| GraphFailure::local(GraphFailureKind::Network, e.to_string()))?;
         let params = [("message", message.as_str()), ("access_token", access_token.as_str())];
         let resp = client
             .post(&url)
             .form(&params)
             .send()
             .await
-            .map_err(|e| format!("Không thể kết nối Graph API: {}", e))?;
+            .map_err(|e| {
+                GraphFailure::local(
+                    GraphFailureKind::Network,
+                    format!("Không thể kết nối Graph API: {}", e),
+                )
+            })?;
         let status = resp.status().as_u16();
-        let body = resp.text().await.map_err(|e| e.to_string())?;
+        let headers = resp.headers().clone();
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| GraphFailure::local(GraphFailureKind::Network, e.to_string()))?;
         if status >= 200 && status < 300 {
-            serde_json::from_str::<serde_json::Value>(&body).map_err(|_| "Không parse được phản hồi".into())
+            serde_json::from_str::<serde_json::Value>(&body).map_err(|_| {
+                GraphFailure::local(
+                    GraphFailureKind::Other,
+                    "Không parse được phản hồi".to_string(),
+                )
+            })
         } else {
-            Err(map_graph_error(status, &body))
+            Err(graph_failure_from_response(status, &headers, &body))
         }
     }
+}
+
+#[tauri::command]
+pub async fn publish_content<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    message: String,
+    image_path: Option<String>,
+) -> Result<serde_json::Value, String> {
+    publish_content_classified(app, page_id, message, image_path)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 fn resolve_token_for_page<R: Runtime>(app: &AppHandle<R>, page_id: &str) -> Result<String, String> {
@@ -412,6 +570,96 @@ mod tests {
         let body = r#"{"error":{"message":"Missing param","type":"GraphMethodException","code":100}}"#;
         let msg = map_graph_error(400, body);
         assert!(msg.contains("100"));
+    }
+
+    fn classify(status: u16, code: Option<i32>, error_type: Option<&str>) -> GraphFailure {
+        classify_graph_error(status, code, error_type, "message".to_string(), None)
+    }
+
+    #[test]
+    fn test_classify_graph_error_mapping_table() {
+        assert_eq!(
+            classify(401, None, None).kind,
+            GraphFailureKind::TokenInvalid
+        );
+        assert_eq!(
+            classify(400, Some(190), None).kind,
+            GraphFailureKind::TokenInvalid
+        );
+        assert_eq!(
+            classify(429, None, None).kind,
+            GraphFailureKind::RateLimited
+        );
+        for code in [4, 32, 613, 368] {
+            assert_eq!(
+                classify(400, Some(code), None).kind,
+                GraphFailureKind::RateLimited,
+                "code {} phải là RateLimited",
+                code
+            );
+        }
+        assert_eq!(
+            classify(400, Some(100), None).kind,
+            GraphFailureKind::InvalidParam
+        );
+        assert_eq!(
+            classify(400, Some(2), None).kind,
+            GraphFailureKind::InvalidParam
+        );
+        assert_eq!(
+            classify(400, Some(200), Some("OAuthException")).kind,
+            GraphFailureKind::InvalidParam
+        );
+        assert_eq!(classify(500, Some(1), None).kind, GraphFailureKind::Other);
+    }
+
+    #[test]
+    fn test_graph_failure_display_equals_message() {
+        let failure = classify(429, Some(4), None);
+        assert_eq!(failure.to_string(), failure.message);
+    }
+
+    #[test]
+    fn test_retry_after_secs_parsing() {
+        let body = r#"{"error":{"message":"rate","type":"OAuthException","code":4}}"#;
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::RETRY_AFTER, "120".parse().unwrap());
+        let failure = graph_failure_from_response(429, &headers, body);
+        assert_eq!(failure.retry_after_secs, Some(120));
+        assert_eq!(failure.kind, GraphFailureKind::RateLimited);
+        assert_eq!(failure.http_status, 429);
+        assert_eq!(failure.code, Some(4));
+
+        let mut http_date_headers = reqwest::header::HeaderMap::new();
+        http_date_headers.insert(
+            reqwest::header::RETRY_AFTER,
+            "Wed, 21 Oct 2026 07:28:00 GMT".parse().unwrap(),
+        );
+        let failure = graph_failure_from_response(429, &http_date_headers, body);
+        assert_eq!(failure.retry_after_secs, None);
+
+        let mut empty_headers = reqwest::header::HeaderMap::new();
+        empty_headers.insert(reqwest::header::RETRY_AFTER, "".parse().unwrap());
+        let failure = graph_failure_from_response(429, &empty_headers, body);
+        assert_eq!(failure.retry_after_secs, None);
+    }
+
+    #[test]
+    fn test_graph_failure_from_response_matches_map_graph_error_text() {
+        let body = r#"{"error":{"message":"Invalid OAuth access token","type":"OAuthException","code":190,"error_subcode":460}}"#;
+        let headers = reqwest::header::HeaderMap::new();
+        let failure = graph_failure_from_response(400, &headers, body);
+        assert_eq!(failure.message, map_graph_error(400, body));
+        assert_eq!(failure.kind, GraphFailureKind::TokenInvalid);
+    }
+
+    #[test]
+    fn test_graph_failure_local_defaults() {
+        let failure = GraphFailure::local(GraphFailureKind::Network, "mất kết nối".to_string());
+        assert_eq!(failure.http_status, 0);
+        assert_eq!(failure.code, None);
+        assert_eq!(failure.retry_after_secs, None);
+        assert_eq!(failure.message, "mất kết nối");
     }
 
     #[test]
