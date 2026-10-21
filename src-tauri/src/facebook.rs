@@ -592,9 +592,6 @@ async fn list_posts_with(
 
 #[tauri::command]
 pub async fn list_page_posts<R: Runtime>(app: AppHandle<R>, page_id: String, limit: Option<u8>) -> Result<serde_json::Value, String> {
-    if page_id.trim().is_empty() {
-        return Err("Thiếu page_id".into());
-    }
     validate_page_id(&page_id)?;
     let access_token = resolve_token_for_page(&app, page_id.trim())?;
     if access_token.trim().is_empty() {
@@ -639,10 +636,8 @@ async fn insights_with(
 
 #[tauri::command]
 pub async fn get_post_insights<R: Runtime>(app: AppHandle<R>, post_id: String) -> Result<serde_json::Value, String> {
-    if post_id.trim().is_empty() {
-        return Err("Thiếu post_id".into());
-    }
-    // post_id thường là {page_id}_{post_id}, tách page_id để lấy token đúng trang
+    // post_id thường là {page_id}_{post_id}, tách page_id để lấy token đúng trang.
+    // split_post_id chạy trước token lookup/network nên id rỗng cũng trả "Post ID không hợp lệ.".
     let (page_id_part, _) = split_post_id(&post_id)?;
     let page_id_part = page_id_part.to_string();
     let access_token = crate::security::get_secret_hybrid(Some(&app), &page_token_key(&page_id_part))
@@ -1017,6 +1012,7 @@ mod tests {
         assert!(body.contains("name=\"source\""), "multipart thieu source");
         assert!(body.contains("name=\"message\""), "multipart thieu message");
         assert!(!body.contains("access_token"), "multipart chua token");
+        assert!(!requests[0].url.as_str().contains("access_token"));
 
         std::fs::remove_file(&image_path).unwrap();
     }
@@ -1136,5 +1132,27 @@ mod tests {
             insights_with(base, "t", "abc_123").await.unwrap_err().kind,
             GraphFailureKind::InvalidParam
         );
+    }
+
+    #[tokio::test]
+    async fn empty_page_id_returns_canonical_message() {
+        // validate_page_id chạy trước token lookup: không cần secret để test.
+        let app = tauri::test::mock_app();
+        let handle = app.handle().clone();
+        let err = crate::facebook::list_page_posts(handle, "  ".into(), None)
+            .await
+            .unwrap_err();
+        assert_eq!(err, "Page ID không được để trống.");
+    }
+
+    #[tokio::test]
+    async fn empty_post_id_returns_canonical_message() {
+        // split_post_id chạy trước token lookup: không cần secret để test.
+        let app = tauri::test::mock_app();
+        let handle = app.handle().clone();
+        let err = crate::facebook::get_post_insights(handle, "".into())
+            .await
+            .unwrap_err();
+        assert_eq!(err, "Post ID không hợp lệ.");
     }
 }

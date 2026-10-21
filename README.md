@@ -63,7 +63,7 @@ FlowPost AI dùng token do bạn tự tạo và dán vào ứng dụng. Token c�
 - Chi tiết: danh sách Trang + bài viết gần đây tải khi mở tab hoặc đổi tab; insights chỉ tải khi bấm `Làm mới`.
 - Token trang được lưu lại chỉ khi giá trị thay đổi.
 - Mọi request Graph dùng Authorization: Bearer; token không còn nằm trong URL, form hoặc multipart.
-- Lỗi Graph được loại bỏ URL và token trước khi trả về frontend.
+- Lỗi mạng và body lỗi không phải JSON được scrub URL/token trước khi trả về frontend; lỗi Graph dạng JSON trả nguyên `message` của Meta.
 - Lệnh get_facebook_token đã bị xóa; frontend không còn API nào trả token thô.
 - `.env` đã được thêm vào `.gitignore`; `page_id` được kiểm tra chỉ gồm chữ số.
 
@@ -91,4 +91,4 @@ Thêm vào đó:
 
 Rust backend tạo thư mục `media` bên trong app data directory của hệ điều hành và lưu `media-index.json` tại cùng vị trí. Mỗi file được đổi sang UUID khi sao chép để tránh trùng tên; tên gốc, loại file, dung lượng và thời điểm nhập vẫn được giữ trong index.
 
-Token Facebook và API key OpenAI Compatible Provider được lưu trong keyring của hệ điều hành; fallback plaintext `secure-credentials.json` trong `app_data_dir` chỉ được ghi khi keyring thất bại (xem `SECURITY.md`). Không đưa token vào frontend, file index hay git. Lỗi Graph đã được loại bỏ URL/token trước khi lưu nên `schedule-index.json` không còn nhận token qua `lastError`; tuy nhiên file do phiên bản cũ ghi vẫn có thể còn token và cần được kiểm tra/quay vòng thủ công.
+Token Facebook và API key OpenAI Compatible Provider được lưu trong keyring của hệ điều hành; fallback plaintext `secure-credentials.json` trong `app_data_dir` chỉ được ghi khi keyring thất bại (xem `SECURITY.md`). Không đưa token vào frontend, file index hay git. Lỗi mạng và body lỗi không phải JSON đã được scrub URL/token trước khi lưu, còn lỗi Graph dạng JSON chỉ giữ `message` của Meta (không chứa token) nên `schedule-index.json` không còn nhận token qua `lastError`; tuy nhiên file do phiên bản cũ ghi vẫn có thể còn token và cần được kiểm tra/quay vòng thủ công.
