@@ -53,14 +53,14 @@ FlowPost AI dùng token do bạn tự tạo và dán vào ứng dụng. Token c�
 1. Mở https://developers.facebook.com/tools/explorer/ → chọn App của bạn → `User Token` → `Add a Permission` tick 5 scopes trên → `Generate Access Token` → Copy. Token tạo ở Graph Explorer chỉ nên dùng để kiểm thử (xem mục production bên dưới).
 2. Mở FlowPost AI → `Cài đặt` → `Kết nối` → dán vào `Nhập Facebook User/Page Access Token` → `Lưu` → `Kiểm tra` phải hiện `Token hợp lệ` (`GET /me`, `facebook.rs:validate_facebook_token`).
 3. Bấm `Tải Trang` → backend gọi `GET /me/accounts?fields=id,name,access_token`, đổi User Token thành Page Token và lưu `fb_page_{id}`; frontend chỉ thấy `id/name` (`facebook.rs:list_facebook_pages`).
-4. Chọn `Trang mặc định cho Lịch`. Danh sách Trang và bài viết gần đây được tải một lần khi mở tab Dashboard hoặc khi chuyển tab; insights 6 metric chỉ được tải khi bạn bấm `Làm mới` trong khung "Bài viết gần đây". Hover `TIẾP CẬN` hiện bảng 2 cột; nếu thiếu `read_insights` thì `reach` giữ `—`.
+4. Chọn `Trang mặc định cho Lịch`. Danh sách Trang và bài viết gần đây được tải khi mở tab Dashboard hoặc khi chuyển tab; insights 6 metric chỉ được tải khi bạn bấm `Làm mới` trong khung "Bài viết gần đây". Hover `TIẾP CẬN` hiện bảng 2 cột; nếu thiếu `read_insights` thì `reach` giữ `—`.
 
 > Lưu ý lưu trữ: token được lưu trong keyring của hệ điều hành và, ở giai đoạn hiện tại, luôn kèm thêm bản sao plaintext `secure-credentials.json` trong `app_data_dir`. Chi tiết và giới hạn: xem `SECURITY.md`.
 
 ### Thay đổi hành vi gần đây
 
-- Dashboard không còn tự gọi Graph API mỗi 4 giây; danh sách bài viết và insights chỉ được tải khi người dùng bấm Làm mới.
-- Chi tiết: danh sách Trang + bài viết gần đây tải một lần khi mở tab hoặc đổi tab; insights chỉ tải khi bấm `Làm mới`.
+- Dashboard không còn tự gọi Graph API mỗi 4 giây; danh sách Trang và bài viết gần đây được tải khi mở/đổi tab, còn insights chỉ được tải khi người dùng bấm Làm mới. Khi mở app lần đầu, danh sách Trang và bài viết có thể được tải hai lần (một lần khi mount, một lần khi danh sách style tải xong).
+- Chi tiết: danh sách Trang + bài viết gần đây tải khi mở tab hoặc đổi tab; insights chỉ tải khi bấm `Làm mới`.
 - Token trang được lưu lại chỉ khi giá trị thay đổi.
 
 > Tip: User Token ngắn hạn 1-2h nên đổi sang dài hạn 60 ngày: `GET /oauth/access_token?grant_type=fb_exchange_token&client_id={app_id}&client_secret={app_secret}&fb_exchange_token={short_token}` — chỉ cần khi bạn có `APP_ID/SECRET` (FlowPost AI không lưu, bạn tự đổi trên Graph Explorer). Khi hết hạn (`code 190`) chỉ cần tạo token mới, dán lại và `Tải Trang` lại, không cần `APP_ID/SECRET` trong app (tránh lộ secret trên desktop).
@@ -87,4 +87,4 @@ Thêm vào đó:
 
 Rust backend tạo thư mục `media` bên trong app data directory của hệ điều hành và lưu `media-index.json` tại cùng vị trí. Mỗi file được đổi sang UUID khi sao chép để tránh trùng tên; tên gốc, loại file, dung lượng và thời điểm nhập vẫn được giữ trong index.
 
-Token Facebook và API key OpenAI Compatible Provider được lưu trong keyring của hệ điều hành; ở giai đoạn hiện tại còn có bản sao plaintext `secure-credentials.json` trong `app_data_dir` (xem `SECURITY.md`). Không đưa token vào frontend, file index hay git.
+Token Facebook và API key OpenAI Compatible Provider được lưu trong keyring của hệ điều hành; ở giai đoạn hiện tại còn có bản sao plaintext `secure-credentials.json` trong `app_data_dir` (xem `SECURITY.md`). Không đưa token vào frontend, file index hay git (ngoại lệ: `schedule-index.json` có thể chứa token qua `lastError` — xem `SECURITY.md`).

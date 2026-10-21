@@ -36,5 +36,5 @@ Nếu bạn phát hiện lỗ hổng bảo mật, vui lòng **không** tạo iss
 
 - Luôn dùng `E2E_API_KEY` qua biến môi trường `env:E2E_API_KEY`, không commit `.env` (đã gitignore trong `e2e/.gitignore`).
 - Quay vòng Page token khi hết hạn (Graph API trả `code 190`) — vào `Cài đặt → Tải Trang` lại.
-- Với lỗi HTTP có body JSON, `map_graph_error` chỉ trả `code` + `message` đã cắt 300 ký tự.
+- Với lỗi HTTP có body JSON, `map_graph_error` trả `code` + `message` nguyên văn; chỉ nhánh không parse được JSON mới cắt body 300 ký tự.
 - **Known issue (chưa sửa):** các nhánh lỗi mạng format nguyên `reqwest::Error`; Display của nó chứa URL request, mà URL hiện mang `access_token` trong query string. Chuỗi này được hiển thị trong UI và lưu vào `lastError` của schedule index. Vì vậy `schedule-index.json` có thể chứa token trên máy đã từng đăng bài. Cách sửa (**Phase 4**): làm sạch (sanitize) lỗi trước khi lưu và hiển thị.
