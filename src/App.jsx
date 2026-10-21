@@ -1610,6 +1610,8 @@ function App() {
   const [graphLoading, setGraphLoading] = useState(false)
   const [lastInsightsAt, setLastInsightsAt] = useState(null)
   const graphLoadingRef = useRef(false)
+  // Ảnh chụp insights đã tải thủ công (chỉ trong bộ nhớ) để loadLocal/loadGraph(false) không xóa mất.
+  const graphSnapshotRef = useRef(null)
   const desktop = isDesktop()
   const today = new Intl.DateTimeFormat('vi-VN', { weekday: 'long', day: '2-digit', month: 'long' }).format(new Date())
   const createPost = () => { setActive('AI Content'); setToast(true); setTimeout(() => setToast(false), 2600) }
@@ -1637,8 +1639,17 @@ function App() {
           type: c.mediaIds && c.mediaIds.length ? 'Ảnh + văn bản' : 'Văn bản', status: contentStatusLabel(c.status), color: ['#f0a86e','#7469d5','#4b9b7d'][i%3], initials: styleLabel.slice(0,2).toUpperCase(), reach: '—', likes: '—', comments: '—', pending: c.status !== 'approved', tooltip: '', tooltipData: { impressions:'—', unique:'—', engaged:'—', clicks:'—', reactions:'—', videoViews:'—' }
         }
       })
-      setDashboardRecent(recent)
-      setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights'); setDashboardEngagementRate('—')
+      const snapshot = graphSnapshotRef.current
+      if (snapshot) {
+        // Giữ lại insights đã tải thủ công khi đổi tab / quay lại cửa sổ.
+        setDashboardRecent(snapshot.recent)
+        setDashboardTotalInteractions(snapshot.totals.interactions)
+        setDashboardTotalSub(snapshot.totals.sub)
+        setDashboardEngagementRate(snapshot.engagementRate)
+      } else {
+        setDashboardRecent(recent)
+        setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights'); setDashboardEngagementRate('—')
+      }
       // Stats
       const now = new Date()
       const thisMonthContents = contents.filter(c => { const d=new Date(c.createdAt); return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear() }).length
@@ -1678,12 +1689,14 @@ function App() {
             if (typeof v === 'object') return JSON.stringify(v)
             return String(v)
           }
+          let insightsFetched = 0
           const enriched = await Promise.all(fbPosts.slice(0,3).map(async (fp, idx) => {
             try {
               let data = []
               if (withInsights === true) {
                 const ins = await invokeDesktop('get_post_insights', { postId: fp.id })
                 data = ins?.data || []
+                insightsFetched += 1
               }
               const msg = fp.message ? fp.message.slice(0,40) : fp.id
               return {
@@ -1696,8 +1709,8 @@ function App() {
             } catch { return null }
           }))
           const filtered = enriched.filter(Boolean)
-          if (filtered.length) {
-            setDashboardRecent(filtered)
+          const previousSnapshot = graphSnapshotRef.current
+          if (filtered.length && withInsights === true && insightsFetched > 0) {
             // Tính tổng tương tác và tỷ lệ từ insights
             let total = 0
             let totalUnique = 0
@@ -1712,13 +1725,29 @@ function App() {
               const unique = Number(String(d.unique).replace(/[^0-9.-]/g,'')) || 0
               totalUnique += unique
             }
-            if (total) { setDashboardTotalInteractions(String(total)); setDashboardTotalSub(`${filtered.length} bài có insights`) } else { setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights') }
-            if (total && totalUnique) { setDashboardEngagementRate(`${((total/totalUnique)*100).toFixed(1)}%`) } else { setDashboardEngagementRate('—') }
-          } else {
+            const snapshot = {
+              recent: filtered,
+              totals: {
+                interactions: total ? String(total) : '—',
+                sub: total ? `${filtered.length} bài có insights` : 'chờ Graph insights'
+              },
+              engagementRate: total && totalUnique ? `${((total/totalUnique)*100).toFixed(1)}%` : '—',
+              lastInsightsAt: Date.now()
+            }
+            graphSnapshotRef.current = snapshot
+            setDashboardRecent(snapshot.recent)
+            setDashboardTotalInteractions(snapshot.totals.interactions)
+            setDashboardTotalSub(snapshot.totals.sub)
+            setDashboardEngagementRate(snapshot.engagementRate)
+            setLastInsightsAt(snapshot.lastInsightsAt)
+          } else if (!previousSnapshot && filtered.length) {
+            // Chưa từng tải insights: hiển thị bài viết Graph với số liệu tạm.
+            setDashboardRecent(filtered)
+            setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights'); setDashboardEngagementRate('—')
+          } else if (!previousSnapshot) {
             setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights'); setDashboardEngagementRate('—')
           }
         }
-        setLastInsightsAt(Date.now())
       }
     } catch { /* không có token read_insights thì giữ '—' */ } finally {
       graphLoadingRef.current = false
