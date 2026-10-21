@@ -4,12 +4,14 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
 
 mod ai;
 mod auto_schedule;
 mod content;
 mod facebook;
+mod image_gen;
+mod image_styles;
 mod providers;
 mod schedule;
 mod security;
@@ -28,7 +30,7 @@ pub(crate) struct MediaItem {
     pub(crate) imported_at: DateTime<Utc>,
 }
 
-fn media_dir(app: &AppHandle) -> Result<PathBuf, String> {
+fn media_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let directory = app
         .path()
         .app_data_dir()
@@ -38,11 +40,11 @@ fn media_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(directory)
 }
 
-fn index_path(app: &AppHandle) -> Result<PathBuf, String> {
+fn index_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     Ok(media_dir(app)?.join("media-index.json"))
 }
 
-fn read_index(app: &AppHandle) -> Result<Vec<MediaItem>, String> {
+fn read_index<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<MediaItem>, String> {
     let path = index_path(app)?;
     if !path.exists() {
         return Ok(Vec::new());
@@ -51,7 +53,7 @@ fn read_index(app: &AppHandle) -> Result<Vec<MediaItem>, String> {
     serde_json::from_str(&contents).map_err(|e| e.to_string())
 }
 
-fn write_index(app: &AppHandle, items: &[MediaItem]) -> Result<(), String> {
+fn write_index<R: Runtime>(app: &AppHandle<R>, items: &[MediaItem]) -> Result<(), String> {
     let path = index_path(app)?;
     let tmp = path.with_extension("json.tmp");
     let json = serde_json::to_string_pretty(items).map_err(|e| e.to_string())?;
@@ -133,6 +135,60 @@ fn kind_for(path: &Path) -> &'static str {
         "mp4" | "mov" | "webm" | "mkv" => "video",
         _ => "image",
     }
+}
+
+fn register_bytes_at(
+    directory: &Path,
+    index: &mut Vec<MediaItem>,
+    bytes: &[u8],
+    name: &str,
+    extension: &str,
+    media_type: &str,
+) -> Result<MediaItem, String> {
+    let ext = extension.trim().trim_start_matches('.').to_lowercase();
+    if ext.is_empty() {
+        return Err("Phần mở rộng ảnh không hợp lệ".into());
+    }
+    let id = uuid::Uuid::new_v4().to_string();
+    let target = directory.join(format!("{}.{}", id, ext));
+    if let Err(e) = fs::write(&target, bytes) {
+        return Err(format!("Không thể ghi ảnh: {}", e));
+    }
+    let size = match fs::metadata(&target) {
+        Ok(metadata) => metadata.len(),
+        Err(e) => {
+            let _ = fs::remove_file(&target);
+            return Err(e.to_string());
+        }
+    };
+    let item = MediaItem {
+        id,
+        name: name.to_string(),
+        path: target.to_string_lossy().to_string(),
+        media_type: media_type.to_string(),
+        extension: ext,
+        size,
+        imported_at: Utc::now(),
+    };
+    index.push(item.clone());
+    Ok(item)
+}
+
+pub(crate) fn register_media_bytes<R: Runtime>(
+    app: &AppHandle<R>,
+    bytes: &[u8],
+    name: &str,
+    extension: &str,
+    media_type: &str,
+) -> Result<MediaItem, String> {
+    let directory = media_dir(app)?;
+    let mut index = read_index(app)?;
+    let item = register_bytes_at(&directory, &mut index, bytes, name, extension, media_type)?;
+    if let Err(e) = write_index(app, &index) {
+        let _ = fs::remove_file(&item.path);
+        return Err(e);
+    }
+    Ok(item)
 }
 
 #[tauri::command]
@@ -359,6 +415,52 @@ mod tests {
 
         fs::remove_dir_all(&dir).unwrap();
     }
+
+    #[test]
+    fn register_bytes_at_writes_file_and_index_row() {
+        let dir = unique_temp_dir("flowpost_register_bytes");
+        let bytes = b"\x89PNG\r\n\x1a\nfake-image-bytes";
+        let mut index: Vec<MediaItem> = Vec::new();
+        let item =
+            register_bytes_at(&dir, &mut index, bytes, "Ảnh AI.png", "png", "image").unwrap();
+
+        assert_eq!(index.len(), 1);
+        assert_eq!(item.name, "Ảnh AI.png");
+        assert_eq!(item.extension, "png");
+        assert_eq!(item.media_type, "image");
+        let path = PathBuf::from(&item.path);
+        assert!(path.exists(), "file must be written");
+        assert!(path.starts_with(&dir), "path must live inside the media dir");
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        assert_eq!(item.size, bytes.len() as u64);
+        assert_eq!(index[0].id, item.id);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn register_bytes_at_rejects_empty_extension() {
+        let dir = unique_temp_dir("flowpost_register_empty_ext");
+        let mut index: Vec<MediaItem> = Vec::new();
+        let err = register_bytes_at(&dir, &mut index, b"x", "n", "  .  ", "image").unwrap_err();
+        assert_eq!(err, "Phần mở rộng ảnh không hợp lệ");
+        assert!(index.is_empty(), "index must stay untouched on error");
+        let entries: Vec<_> = fs::read_dir(&dir).unwrap().collect();
+        assert!(entries.is_empty(), "no file should be written");
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn register_bytes_at_normalizes_dot_and_case() {
+        let dir = unique_temp_dir("flowpost_register_ext_case");
+        let mut index: Vec<MediaItem> = Vec::new();
+        let item = register_bytes_at(&dir, &mut index, b"x", "n", ".PNG", "image").unwrap();
+        assert_eq!(item.extension, "png");
+        assert!(item.path.ends_with(".png"), "path={}", item.path);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
 }
 
 pub fn run() {
@@ -400,6 +502,16 @@ pub fn run() {
             styles::duplicate_style,
             styles::delete_style,
             styles::reset_style,
+            image_styles::list_image_styles,
+            image_styles::create_image_style,
+            image_styles::update_image_style,
+            image_styles::duplicate_image_style,
+            image_styles::delete_image_style,
+            image_styles::reset_image_style,
+            image_gen::get_image_config,
+            image_gen::set_image_config,
+            image_gen::pick_image_folder,
+            image_gen::generate_image,
             topics::list_topics,
             topics::create_topic,
             topics::update_topic,

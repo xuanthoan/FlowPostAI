@@ -21,6 +21,8 @@ pub struct Provider {
     pub models: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_image_model: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -33,6 +35,8 @@ pub struct ProviderPublic {
     pub models: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_image_model: Option<String>,
     pub has_api_key: bool,
 }
 
@@ -53,6 +57,8 @@ pub struct CreateProviderPayload {
     pub models: Option<Vec<String>>,
     #[serde(default)]
     pub default_model: Option<String>,
+    #[serde(default)]
+    pub default_image_model: Option<String>,
     pub api_key: Option<String>,
 }
 
@@ -65,6 +71,8 @@ pub struct UpdateProviderPayload {
     pub models: Option<Vec<String>>,
     #[serde(default)]
     pub default_model: Option<String>,
+    #[serde(default)]
+    pub default_image_model: Option<String>,
     pub api_key: Option<String>,
 }
 
@@ -174,8 +182,35 @@ pub(crate) fn resolve_model(provider: &Provider, explicit: Option<&str>) -> Stri
         .unwrap_or_else(|| DEFAULT_MODEL.to_string())
 }
 
-const KNOWN_ENDPOINT_SUFFIXES: [&str; 4] =
-    ["/chat/completions", "/responses", "/messages", "/models"];
+/// explicit -> provider.defaultImageModel -> provider.defaultModel -> models[0] -> DEFAULT_MODEL
+pub(crate) fn resolve_image_model(provider: &Provider, explicit: Option<&str>) -> String {
+    fn non_blank(value: Option<&str>) -> Option<String> {
+        value
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+    }
+    non_blank(explicit)
+        .or_else(|| non_blank(provider.default_image_model.as_deref()))
+        .or_else(|| non_blank(provider.default_model.as_deref()))
+        .or_else(|| {
+            provider
+                .models
+                .iter()
+                .map(|m| m.trim())
+                .find(|m| !m.is_empty())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| DEFAULT_MODEL.to_string())
+}
+
+const KNOWN_ENDPOINT_SUFFIXES: [&str; 5] = [
+    "/chat/completions",
+    "/responses",
+    "/messages",
+    "/models",
+    "/images/generations",
+];
 
 /// Chuan hoa base URL nguoi dung nhap ve "root" dung chung cho ca chat va models.
 /// - trim khoang trang; thay "localhost" -> "127.0.0.1" (giu hanh vi cu)
@@ -205,6 +240,10 @@ pub(crate) fn models_url(base: &str) -> String {
 
 pub(crate) fn chat_completions_url(base: &str) -> String {
     format!("{}/chat/completions", normalize_base_root(base))
+}
+
+pub(crate) fn images_generations_url(base: &str) -> String {
+    format!("{}/images/generations", normalize_base_root(base))
 }
 
 fn push_model(out: &mut Vec<String>, raw: &str) {
@@ -290,6 +329,10 @@ fn apply_update_fields(
         // Some("") clears; absent (None) leaves unchanged.
         provider.default_model = normalize_optional_model(Some(default_model.clone()));
     }
+    if let Some(default_image_model) = &payload.default_image_model {
+        // Some("") clears; absent (None) leaves unchanged.
+        provider.default_image_model = normalize_optional_model(Some(default_image_model.clone()));
+    }
     Ok(())
 }
 
@@ -311,6 +354,7 @@ fn to_public(provider: &Provider, has_api_key: bool) -> ProviderPublic {
         protocol: provider.protocol.clone(),
         models: provider.models.clone(),
         default_model: provider.default_model.clone(),
+        default_image_model: provider.default_image_model.clone(),
         has_api_key,
     }
 }
@@ -331,6 +375,7 @@ fn default_provider() -> Provider {
         protocol: DEFAULT_PROTOCOL.to_string(),
         models: vec![DEFAULT_MODEL.to_string()],
         default_model: None,
+        default_image_model: None,
     }
 }
 
@@ -552,6 +597,7 @@ pub fn create_provider(app: AppHandle, payload: CreateProviderPayload) -> Result
         .unwrap_or_else(|| id.clone());
     let models = normalize_models(payload.models);
     let default_model = normalize_optional_model(payload.default_model);
+    let default_image_model = normalize_optional_model(payload.default_image_model);
     let provider = Provider {
         id: id.clone(),
         display_name,
@@ -559,6 +605,7 @@ pub fn create_provider(app: AppHandle, payload: CreateProviderPayload) -> Result
         protocol: payload.protocol.trim().to_string(),
         models: models_for_create(&payload.base_url, models),
         default_model,
+        default_image_model,
     };
     if let Some(key) = payload.api_key {
         if !key.trim().is_empty() {
@@ -754,7 +801,18 @@ mod tests {
             protocol: "openai-completions".into(),
             models: models.iter().map(|m| m.to_string()).collect(),
             default_model: default_model.map(|m| m.to_string()),
+            default_image_model: None,
         }
+    }
+
+    fn provider_with_image_default(
+        default_model: Option<&str>,
+        default_image_model: Option<&str>,
+        models: &[&str],
+    ) -> Provider {
+        let mut provider = provider_with_default(default_model, models);
+        provider.default_image_model = default_image_model.map(|m| m.to_string());
+        provider
     }
 
     #[test]
@@ -870,6 +928,122 @@ mod tests {
     }
 
     #[test]
+    fn resolve_image_model_prefers_explicit() {
+        let provider =
+            provider_with_image_default(Some("text-model"), Some("image-model"), &["first-model"]);
+        assert_eq!(
+            resolve_image_model(&provider, Some("  explicit-image  ")),
+            "explicit-image"
+        );
+        assert_eq!(
+            resolve_image_model(&provider, Some("explicit-image")),
+            "explicit-image"
+        );
+    }
+
+    #[test]
+    fn resolve_image_model_uses_default_image_model_over_default_model() {
+        let provider =
+            provider_with_image_default(Some("text-model"), Some("image-model"), &["first-model"]);
+        assert_eq!(resolve_image_model(&provider, None), "image-model");
+        assert_eq!(resolve_image_model(&provider, Some("   ")), "image-model");
+        let trimmed = provider_with_image_default(None, Some("  image-model  "), &["m"]);
+        assert_eq!(resolve_image_model(&trimmed, None), "image-model");
+    }
+
+    #[test]
+    fn resolve_image_model_falls_back_to_default_model() {
+        let provider = provider_with_image_default(Some("text-model"), None, &["first-model"]);
+        assert_eq!(resolve_image_model(&provider, None), "text-model");
+        let blank_image =
+            provider_with_image_default(Some("text-model"), Some("  "), &["first-model"]);
+        assert_eq!(resolve_image_model(&blank_image, None), "text-model");
+    }
+
+    #[test]
+    fn resolve_image_model_falls_back_to_first_model() {
+        let provider = provider_with_image_default(None, None, &["  ", " first-model "]);
+        assert_eq!(resolve_image_model(&provider, None), "first-model");
+        assert_eq!(resolve_image_model(&provider, Some("")), "first-model");
+    }
+
+    #[test]
+    fn resolve_image_model_falls_back_to_constant() {
+        let provider = provider_with_image_default(None, None, &[]);
+        assert_eq!(resolve_image_model(&provider, None), DEFAULT_MODEL);
+        let blank = provider_with_image_default(Some("  "), Some("  "), &["  "]);
+        assert_eq!(resolve_image_model(&blank, Some("   ")), DEFAULT_MODEL);
+    }
+
+    #[test]
+    fn images_generations_url_appends_once() {
+        assert_eq!(
+            images_generations_url("https://x/v1"),
+            "https://x/v1/images/generations"
+        );
+        assert_eq!(
+            images_generations_url("https://x/v1/images/generations"),
+            "https://x/v1/images/generations"
+        );
+        assert_eq!(
+            images_generations_url("https://x/v1/images/generations/"),
+            "https://x/v1/images/generations"
+        );
+        assert_eq!(
+            images_generations_url("https://x/v1/models"),
+            "https://x/v1/images/generations"
+        );
+    }
+
+    #[test]
+    fn provider_deserializes_without_default_image_model() {
+        let provider: Provider = serde_json::from_str(
+            r#"{"id":"acme-gateway","displayName":"Acme","baseUrl":"https://example.com/v1","protocol":"openai-completions","models":["m"]}"#,
+        )
+        .unwrap();
+        assert_eq!(provider.default_image_model, None);
+    }
+
+    #[test]
+    fn provider_public_serializes_default_image_model_camel_case() {
+        let provider = provider_with_image_default(None, Some("image-model"), &["m"]);
+        let public = to_public(&provider, false);
+        let json = serde_json::to_value(&public).unwrap();
+        assert_eq!(
+            json.get("defaultImageModel").and_then(|v| v.as_str()),
+            Some("image-model")
+        );
+        assert!(json.get("default_image_model").is_none());
+
+        let without = to_public(&provider_with_default(None, &["m"]), false);
+        let json_without = serde_json::to_value(&without).unwrap();
+        assert!(json_without.get("defaultImageModel").is_none());
+    }
+
+    #[test]
+    fn apply_update_fields_default_image_model_clear_vs_keep() {
+        let mut provider = sample_provider(vec!["m".to_string()]);
+
+        let mut set = blank_update_payload();
+        set.default_image_model = Some("  image-model  ".into());
+        apply_update_fields(&mut provider, &set).unwrap();
+        assert_eq!(provider.default_image_model.as_deref(), Some("image-model"));
+        assert_eq!(provider.default_model, None);
+
+        let mut clear = blank_update_payload();
+        clear.default_image_model = Some("   ".into());
+        apply_update_fields(&mut provider, &clear).unwrap();
+        assert_eq!(provider.default_image_model, None);
+
+        let mut restore = blank_update_payload();
+        restore.default_image_model = Some("keep-me".into());
+        apply_update_fields(&mut provider, &restore).unwrap();
+        let absent = blank_update_payload();
+        apply_update_fields(&mut provider, &absent).unwrap();
+        assert_eq!(provider.default_image_model.as_deref(), Some("keep-me"));
+    }
+
+    #[test]
     fn test_providers_file_atomic_cleans_tmp() {
         let dir = unique_temp_dir("flowpost_providers_atomic");
         let path = providers_path_for_test(&dir);
@@ -886,6 +1060,7 @@ mod tests {
                 protocol: "openai-completions".into(),
                 models: vec!["model-x".into()],
                 default_model: None,
+                default_image_model: None,
             }],
             active_provider_id: "acme-gateway".into(),
         };
@@ -956,6 +1131,7 @@ mod tests {
                 protocol: "openai-completions".into(),
                 models: vec!["model-a".into(), "model-b".into()],
                 default_model: None,
+                default_image_model: None,
             }],
             active_provider_id: "acme-gateway".into(),
         };
@@ -990,6 +1166,7 @@ mod tests {
             protocol: "openai-completions".into(),
             models,
             default_model: None,
+            default_image_model: None,
         }
     }
 
@@ -1000,6 +1177,7 @@ mod tests {
             protocol: None,
             models: None,
             default_model: None,
+            default_image_model: None,
             api_key: None,
         }
     }
