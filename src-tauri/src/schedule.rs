@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Manager};
 
 use crate::facebook::{GraphFailure, GraphFailureKind};
+use crate::facebook::{ALLOWED_IMAGE_MIMES, MAX_IMAGE_BYTES};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -223,6 +224,8 @@ pub fn create_schedule(app: AppHandle, payload: CreateSchedulePayload) -> Result
         return Err("Thời gian lên lịch phải trong tương lai (tối thiểu 5 phút)".into());
     }
     validate_content_approved(&app, &payload.content_id)?;
+    let (_body, image_paths) = read_content_with_media(&app, &payload.content_id)?;
+    crate::facebook::validate_image_count(image_paths.len())?;
 
     let config = read_scheduler_config(&app)?;
     let mut items = read_schedule_index(&app)?;
@@ -621,8 +624,8 @@ pub async fn process_due_schedules(app: &AppHandle) -> Result<TickOutcome, Strin
         }
         outcome.attempted += 1;
 
-        let (content_body, first_image) = match read_content_with_media(app, &items[i].content_id) {
-            Ok((body, image)) => (body, image),
+        let (content_body, image_paths) = match read_content_with_media(app, &items[i].content_id) {
+            Ok((body, paths)) => (body, paths),
             Err(e) => {
                 let failure = GraphFailure::local(GraphFailureKind::Other, e);
                 apply_failure(&mut items[i], &failure, now);
@@ -631,11 +634,11 @@ pub async fn process_due_schedules(app: &AppHandle) -> Result<TickOutcome, Strin
             }
         };
         let resolved_page_id = resolve_item_page(&items[i], &config).unwrap_or_default();
-        let res = crate::facebook::publish_content_classified(
+        let res = crate::facebook::publish_content_classified_multi(
             app.clone(),
             resolved_page_id,
             content_body,
-            first_image,
+            image_paths,
         )
         .await;
         match res {
@@ -684,52 +687,81 @@ fn read_content_body(app: &AppHandle, content_id: &str) -> Result<String, String
     Ok(crate::content::compose_facebook_post(&found.title, &found.body))
 }
 
-fn resolve_first_image_path(app: &AppHandle, media_ids: &[String]) -> Option<String> {
-    if media_ids.is_empty() {
-        return None;
-    }
-    let first_id = media_ids[0].trim();
-    if first_id.is_empty() {
-        return None;
-    }
-    // Read media-index.json (duplicate logic from lib.rs to avoid private access)
-    let media_path = match app.path().app_data_dir() {
-        Ok(d) => d.join("media").join("media-index.json"),
-        Err(_) => return None,
-    };
-    if !media_path.exists() {
-        return None;
-    }
-    let contents = std::fs::read_to_string(&media_path).ok()?;
-    if contents.trim().is_empty() {
-        return None;
-    }
-    // Parse as generic Value to avoid private MediaItem struct
-    let items: Vec<serde_json::Value> = serde_json::from_str(&contents).ok()?;
-    let found = items.iter().find(|v| v.get("id").and_then(|id| id.as_str()) == Some(first_id))?;
-    let path = found.get("path").and_then(|p| p.as_str())?;
-    let media_type = found.get("mediaType").and_then(|t| t.as_str()).unwrap_or("image");
-    if media_type != "image" {
-        return None;
-    }
-    let p = std::path::Path::new(path);
-    if !p.exists() {
-        return None;
-    }
-    // Pre-flight like facebook.rs: size <=10MB and mime whitelist
-    if let Ok(meta) = std::fs::metadata(p) {
-        if meta.len() > 10 * 1024 * 1024 {
-            return None;
-        }
-    }
-    let mime = mime_guess::from_path(p).first_or_octet_stream().to_string();
-    if !["image/jpeg", "image/png", "image/webp", "image/gif"].contains(&mime.as_str()) {
-        return None;
-    }
-    Some(path.to_string())
+#[derive(Debug, Clone)]
+pub(crate) struct ImageCandidate {
+    pub path: String,
+    pub is_image: bool,
+    pub exists: bool,
+    pub size_bytes: Option<u64>,
 }
 
-fn read_content_with_media(app: &AppHandle, content_id: &str) -> Result<(String, Option<String>), String> {
+/// Giữ các ứng viên đủ điều kiện đăng, đúng thứ tự đầu vào. Không cắt theo cap:
+/// việc chặn quá 10 ảnh do `facebook::validate_image_count` quyết định.
+pub(crate) fn select_publishable_images(candidates: &[ImageCandidate]) -> Vec<String> {
+    let mut out = Vec::new();
+    for c in candidates {
+        if !c.is_image || !c.exists {
+            continue;
+        }
+        match c.size_bytes {
+            Some(sz) if sz <= MAX_IMAGE_BYTES => {}
+            _ => continue,
+        }
+        let mime = mime_guess::from_path(&c.path)
+            .first_or_octet_stream()
+            .to_string();
+        if !ALLOWED_IMAGE_MIMES.contains(&mime.as_str()) {
+            continue;
+        }
+        out.push(c.path.clone());
+    }
+    out
+}
+
+fn resolve_publishable_image_paths(app: &AppHandle, media_ids: &[String]) -> Vec<String> {
+    if media_ids.is_empty() {
+        return Vec::new();
+    }
+    // Read media-index.json trực tiếp để không phụ thuộc module lib.rs.
+    let media_path = match app.path().app_data_dir() {
+        Ok(d) => d.join("media").join("media-index.json"),
+        Err(_) => return Vec::new(),
+    };
+    if !media_path.exists() {
+        return Vec::new();
+    }
+    let contents = match std::fs::read_to_string(&media_path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    if contents.trim().is_empty() {
+        return Vec::new();
+    }
+    let items: Vec<crate::MediaItem> = match serde_json::from_str(&contents) {
+        Ok(items) => items,
+        Err(_) => return Vec::new(),
+    };
+    let mut candidates = Vec::with_capacity(media_ids.len());
+    for id in media_ids {
+        let id = id.trim();
+        if id.is_empty() {
+            continue;
+        }
+        let item = match items.iter().find(|m| m.id == id) {
+            Some(item) => item,
+            None => continue,
+        };
+        candidates.push(ImageCandidate {
+            path: item.path.clone(),
+            is_image: item.media_type == "image",
+            exists: std::path::Path::new(&item.path).exists(),
+            size_bytes: std::fs::metadata(&item.path).ok().map(|m| m.len()),
+        });
+    }
+    select_publishable_images(&candidates)
+}
+
+fn read_content_with_media(app: &AppHandle, content_id: &str) -> Result<(String, Vec<String>), String> {
     let content_path = app
         .path()
         .app_data_dir()
@@ -746,8 +778,8 @@ fn read_content_with_media(app: &AppHandle, content_id: &str) -> Result<(String,
     let items: Vec<crate::content::ContentItem> =
         serde_json::from_str(&contents).map_err(|e| e.to_string())?;
     let found = items.into_iter().find(|c| c.id == content_id).ok_or_else(|| format!("Không tìm thấy nội dung {}", content_id))?;
-    let image_path = resolve_first_image_path(app, &found.media_ids);
-    Ok((crate::content::compose_facebook_post(&found.title, &found.body), image_path))
+    let image_paths = resolve_publishable_image_paths(app, &found.media_ids);
+    Ok((crate::content::compose_facebook_post(&found.title, &found.body), image_paths))
 }
 
 #[cfg(test)]
@@ -1166,5 +1198,50 @@ mod tests {
             items.push(item);
         }
         assert_eq!(select_due_indices(&items, now, 3), vec![1, 0, 2]);
+    }
+
+    fn candidate(path: &str, is_image: bool, exists: bool, size_bytes: Option<u64>) -> ImageCandidate {
+        ImageCandidate {
+            path: path.to_string(),
+            is_image,
+            exists,
+            size_bytes,
+        }
+    }
+
+    #[test]
+    fn select_publishable_images_filters_and_keeps_order() {
+        let candidates = vec![
+            candidate("video.mp4", false, true, Some(1024)),
+            candidate("missing.png", true, false, Some(1024)),
+            candidate("huge.png", true, true, Some(MAX_IMAGE_BYTES + 1)),
+            candidate("a.exe", true, true, Some(1024)),
+            candidate("ok1.png", true, true, Some(1024)),
+            candidate("ok2.jpg", true, true, Some(2048)),
+        ];
+        assert_eq!(
+            select_publishable_images(&candidates),
+            vec!["ok1.png".to_string(), "ok2.jpg".to_string()]
+        );
+    }
+
+    #[test]
+    fn select_publishable_images_empty_when_none_usable() {
+        let candidates = vec![
+            candidate("video.mp4", false, true, Some(1024)),
+            candidate("missing.png", true, false, Some(1024)),
+            candidate("huge.png", true, true, Some(MAX_IMAGE_BYTES + 1)),
+            candidate("a.exe", true, true, Some(1024)),
+            candidate("no-size.png", true, true, None),
+        ];
+        assert!(select_publishable_images(&candidates).is_empty());
+    }
+
+    #[test]
+    fn select_publishable_images_does_not_truncate() {
+        let candidates: Vec<ImageCandidate> = (0..12)
+            .map(|i| candidate(&format!("ok{}.png", i), true, true, Some(1024)))
+            .collect();
+        assert_eq!(select_publishable_images(&candidates).len(), 12);
     }
 }

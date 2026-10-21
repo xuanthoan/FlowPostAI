@@ -66,6 +66,9 @@ FlowPost AI dùng token do bạn tự tạo và dán vào ứng dụng. Token c�
 - Lỗi mạng và body lỗi không phải JSON được scrub URL/token trước khi trả về frontend; lỗi Graph dạng JSON trả nguyên `message` của Meta.
 - Lệnh get_facebook_token đã bị xóa; frontend không còn API nào trả token thô.
 - `.env` đã được thêm vào `.gitignore`; `page_id` được kiểm tra chỉ gồm chữ số.
+- Đăng nhiều ảnh: tối đa 10 ảnh/bài. Với 1 ảnh, ứng dụng gọi POST /{page_id}/photos như trước. Với 2–10 ảnh, ứng dụng tải tuần tự từng ảnh bằng POST /{page_id}/photos với published=false, rồi tạo bài bằng POST /{page_id}/feed với attached_media[i]={"media_fbid":"..."}.
+- Nếu một ảnh tải lên thất bại, bài viết không được tạo; các ảnh đã tải lên ở trạng thái chưa công bố và không được tự động xoá.
+- Lịch đăng dùng toàn bộ ảnh hợp lệ của nội dung (tối đa 10). Ảnh/video thiếu tệp, quá 10MB hoặc sai định dạng bị bỏ qua; nếu không còn ảnh hợp lệ, bài chỉ có chữ.
 
 > Tip: User Token ngắn hạn 1-2h nên đổi sang dài hạn 60 ngày: `GET /oauth/access_token?grant_type=fb_exchange_token&client_id={app_id}&client_secret={app_secret}&fb_exchange_token={short_token}` — chỉ cần khi bạn có `APP_ID/SECRET` (FlowPost AI không lưu, bạn tự đổi trên Graph Explorer). Khi hết hạn (`code 190`) chỉ cần tạo token mới, dán lại và `Tải Trang` lại, không cần `APP_ID/SECRET` trong app (tránh lộ secret trên desktop).
 

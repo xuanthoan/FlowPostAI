@@ -18,14 +18,14 @@ mod topics;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct MediaItem {
-    id: String,
-    name: String,
-    path: String,
-    media_type: String,
-    extension: String,
-    size: u64,
-    imported_at: DateTime<Utc>,
+pub(crate) struct MediaItem {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) path: String,
+    pub(crate) media_type: String,
+    pub(crate) extension: String,
+    pub(crate) size: u64,
+    pub(crate) imported_at: DateTime<Utc>,
 }
 
 fn media_dir(app: &AppHandle) -> Result<PathBuf, String> {

@@ -11,6 +11,14 @@ use tauri::{AppHandle, Runtime};
 /// fail after the upload.
 const GRAPH_MAX_MESSAGE_CHARS: usize = 63_206;
 
+/// Facebook cho phép gắn tối đa 10 ảnh vào một bài viết.
+pub const MAX_IMAGES_PER_POST: usize = 10;
+pub(crate) const MAX_IMAGE_BYTES: u64 = 10 * 1024 * 1024;
+pub(crate) const ALLOWED_IMAGE_MIMES: [&str; 4] =
+    ["image/jpeg", "image/png", "image/webp", "image/gif"];
+const PHOTO_UPLOAD_TIMEOUT_SECS: u64 = 30;
+const FEED_TIMEOUT_SECS: u64 = 30;
+
 /// One shared HTTP client for every Graph request. Rebuilding a client per
 /// request discarded the connection pool and kept six copies of the same
 /// timeout/user-agent configuration in sync by hand.
@@ -401,11 +409,11 @@ fn validate_message_length(message: &str) -> Result<(), String> {
     }
 }
 
-pub async fn publish_content_classified<R: Runtime>(
+pub async fn publish_content_classified_multi<R: Runtime>(
     app: AppHandle<R>,
     page_id: String,
     message: String,
-    image_path: Option<String>,
+    image_paths: Vec<String>,
 ) -> Result<serde_json::Value, GraphFailure> {
     if let Err(e) = validate_page_id(&page_id) {
         return Err(GraphFailure::local(GraphFailureKind::InvalidParam, e));
@@ -421,6 +429,9 @@ pub async fn publish_content_classified<R: Runtime>(
     if let Err(e) = validate_message_length(&message) {
         return Err(GraphFailure::local(GraphFailureKind::InvalidParam, e));
     }
+    let paths = normalize_image_paths(image_paths)?;
+    validate_image_count(paths.len())
+        .map_err(|e| GraphFailure::local(GraphFailureKind::InvalidParam, e))?;
     // Resolve token: ưu tiên Page token đã cache, fallback User token
     let access_token = crate::security::get_secret_hybrid(Some(&app), &page_token_key(&page_id))
         .ok()
@@ -445,18 +456,29 @@ pub async fn publish_content_classified<R: Runtime>(
     if cfg!(test) {
         return Ok(serde_json::json!({"id":"mock_photo_123"}));
     }
-    publish_with(
+    publish_images_with(
         graph_base().as_str(),
         &access_token,
         &page_id,
         &message,
-        image_path.as_deref(),
+        &paths,
     )
     .await
 }
 
-/// Dựng multipart cho `/{page_id}/photos`: chỉ `source` + `message`.
-async fn build_photo_form(path: &str, message: &str) -> Result<reqwest::multipart::Form, GraphFailure> {
+pub async fn publish_content_classified<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    message: String,
+    image_path: Option<String>,
+) -> Result<serde_json::Value, GraphFailure> {
+    let image_paths: Vec<String> = image_path.into_iter().collect();
+    publish_content_classified_multi(app, page_id, message, image_paths).await
+}
+
+/// Kiểm tra và dựng phần `source` dùng chung cho cả bài 1 ảnh và ảnh chưa
+/// công bố (multi-photo). Thứ tự kiểm tra giữ nguyên như bản cũ.
+async fn photo_part(path: &str) -> Result<reqwest::multipart::Part, GraphFailure> {
     let p = std::path::Path::new(path);
     if !p.exists() {
         return Err(GraphFailure::local(
@@ -466,14 +488,14 @@ async fn build_photo_form(path: &str, message: &str) -> Result<reqwest::multipar
     }
     let meta = std::fs::metadata(p)
         .map_err(|e| GraphFailure::local(GraphFailureKind::InvalidParam, e.to_string()))?;
-    if meta.len() > 10 * 1024 * 1024 {
+    if meta.len() > MAX_IMAGE_BYTES {
         return Err(GraphFailure::local(
             GraphFailureKind::InvalidParam,
             "Ảnh vượt quá 10MB".to_string(),
         ));
     }
     let mime = mime_guess::from_path(p).first_or_octet_stream().to_string();
-    if !["image/jpeg", "image/png", "image/webp", "image/gif"].contains(&mime.as_str()) {
+    if !ALLOWED_IMAGE_MIMES.contains(&mime.as_str()) {
         return Err(GraphFailure::local(
             GraphFailureKind::InvalidParam,
             "Định dạng ảnh không hỗ trợ (chỉ jpg/jpeg/png/webp/gif)".to_string(),
@@ -486,53 +508,121 @@ async fn build_photo_form(path: &str, message: &str) -> Result<reqwest::multipar
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
-    let part = reqwest::multipart::Part::bytes(bytes)
+    reqwest::multipart::Part::bytes(bytes)
         .file_name(file_name)
         .mime_str(&mime)
-        .map_err(|e| GraphFailure::local(GraphFailureKind::InvalidParam, e.to_string()))?;
+        .map_err(|e| GraphFailure::local(GraphFailureKind::InvalidParam, e.to_string()))
+}
+
+/// Dựng multipart cho `/{page_id}/photos`: chỉ `source` + `message`.
+async fn build_photo_form(path: &str, message: &str) -> Result<reqwest::multipart::Form, GraphFailure> {
+    let part = photo_part(path).await?;
     Ok(reqwest::multipart::Form::new()
         .part("source", part)
         .text("message", message.to_string()))
 }
 
-async fn publish_with(
+/// Dựng multipart tải ảnh chưa công bố: `source` + `published=false`, KHÔNG
+/// có `message` (caption chỉ gửi ở bước tạo bài `/feed`).
+async fn build_unpublished_photo_form(
+    path: &str,
+) -> Result<reqwest::multipart::Form, GraphFailure> {
+    let part = photo_part(path).await?;
+    Ok(reqwest::multipart::Form::new()
+        .part("source", part)
+        .text("published", "false"))
+}
+
+fn normalize_image_paths(raw: Vec<String>) -> Result<Vec<String>, GraphFailure> {
+    let mut out = Vec::with_capacity(raw.len());
+    for p in raw {
+        let t = p.trim();
+        if t.is_empty() {
+            return Err(GraphFailure::local(
+                GraphFailureKind::InvalidParam,
+                "Đường dẫn ảnh không hợp lệ.".to_string(),
+            ));
+        }
+        out.push(t.to_string());
+    }
+    Ok(out)
+}
+
+pub(crate) fn validate_image_count(count: usize) -> Result<(), String> {
+    if count > MAX_IMAGES_PER_POST {
+        return Err(format!(
+            "Chỉ đăng tối đa {} ảnh mỗi bài (nội dung có {} ảnh). Vui lòng bớt ảnh.",
+            MAX_IMAGES_PER_POST, count
+        ));
+    }
+    Ok(())
+}
+
+fn multi_photo_feed_params(message: &str, media_fbids: &[String]) -> Vec<(String, String)> {
+    let mut params = Vec::with_capacity(media_fbids.len() + 1);
+    params.push(("message".to_string(), message.to_string()));
+    for (i, id) in media_fbids.iter().enumerate() {
+        params.push((
+            format!("attached_media[{}]", i),
+            serde_json::json!({ "media_fbid": id }).to_string(),
+        ));
+    }
+    params
+}
+
+/// Tải một ảnh ở trạng thái chưa công bố và trả về `media_fbid`.
+async fn upload_unpublished_photo(
+    base: &str,
+    token: &str,
+    page_id: &str,
+    path: &str,
+) -> Result<String, GraphFailure> {
+    let form = build_unpublished_photo_form(path).await?;
+    let resp = graph_client()
+        .post(format!("{}/{}/photos", base, page_id))
+        .timeout(std::time::Duration::from_secs(PHOTO_UPLOAD_TIMEOUT_SECS))
+        .bearer_auth(token)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(network_failure)?;
+    let status = resp.status().as_u16();
+    let headers = resp.headers().clone();
+    let body = resp.text().await.map_err(body_read_failure)?;
+    if !(200..300).contains(&status) {
+        return Err(graph_failure_from_response(status, &headers, &body));
+    }
+    let value = parse_json_response(&body)?;
+    let id = value
+        .get("id")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| {
+            GraphFailure::local(
+                GraphFailureKind::Other,
+                "Facebook không trả về id ảnh sau khi tải lên.".to_string(),
+            )
+        })?;
+    Ok(id)
+}
+
+async fn post_multi_photo_feed(
     base: &str,
     token: &str,
     page_id: &str,
     message: &str,
-    image_path: Option<&str>,
+    media_fbids: &[String],
 ) -> Result<serde_json::Value, GraphFailure> {
-    validate_page_id(page_id)
-        .map_err(|e| GraphFailure::local(GraphFailureKind::InvalidParam, e))?;
-    if message.trim().is_empty() {
-        return Err(GraphFailure::local(
-            GraphFailureKind::InvalidParam,
-            "Vui lòng nhập nội dung".to_string(),
-        ));
-    }
-    validate_message_length(message)
-        .map_err(|e| GraphFailure::local(GraphFailureKind::InvalidParam, e))?;
-    let page_id = page_id.trim();
-    let resp = if let Some(path) = image_path {
-        let form = build_photo_form(path, message).await?;
-        graph_client()
-            .post(format!("{}/{}/photos", base, page_id))
-            .timeout(std::time::Duration::from_secs(30))
-            .bearer_auth(token)
-            .multipart(form)
-            .send()
-            .await
-            .map_err(network_failure)?
-    } else {
-        let params = [("message", message)];
-        graph_client()
-            .post(format!("{}/{}/feed", base, page_id))
-            .bearer_auth(token)
-            .form(&params)
-            .send()
-            .await
-            .map_err(network_failure)?
-    };
+    let params = multi_photo_feed_params(message, media_fbids);
+    let resp = graph_client()
+        .post(format!("{}/{}/feed", base, page_id))
+        .timeout(std::time::Duration::from_secs(FEED_TIMEOUT_SECS))
+        .bearer_auth(token)
+        .form(&params)
+        .send()
+        .await
+        .map_err(network_failure)?;
     let status = resp.status().as_u16();
     let headers = resp.headers().clone();
     let body = resp.text().await.map_err(body_read_failure)?;
@@ -543,14 +633,105 @@ async fn publish_with(
     }
 }
 
+fn validate_post_inputs(page_id: &str, message: &str) -> Result<(), GraphFailure> {
+    validate_page_id(page_id)
+        .map_err(|e| GraphFailure::local(GraphFailureKind::InvalidParam, e))?;
+    if message.trim().is_empty() {
+        return Err(GraphFailure::local(
+            GraphFailureKind::InvalidParam,
+            "Vui lòng nhập nội dung".to_string(),
+        ));
+    }
+    validate_message_length(message)
+        .map_err(|e| GraphFailure::local(GraphFailureKind::InvalidParam, e))?;
+    Ok(())
+}
+
+async fn publish_images_with(
+    base: &str,
+    token: &str,
+    page_id: &str,
+    message: &str,
+    image_paths: &[String],
+) -> Result<serde_json::Value, GraphFailure> {
+    validate_post_inputs(page_id, message)?;
+    validate_image_count(image_paths.len())
+        .map_err(|e| GraphFailure::local(GraphFailureKind::InvalidParam, e))?;
+    let page_id = page_id.trim();
+    match image_paths.len() {
+        0 => {
+            let params = [("message", message)];
+            let resp = graph_client()
+                .post(format!("{}/{}/feed", base, page_id))
+                .bearer_auth(token)
+                .form(&params)
+                .send()
+                .await
+                .map_err(network_failure)?;
+            let status = resp.status().as_u16();
+            let headers = resp.headers().clone();
+            let body = resp.text().await.map_err(body_read_failure)?;
+            if (200..300).contains(&status) {
+                parse_json_response(&body)
+            } else {
+                Err(graph_failure_from_response(status, &headers, &body))
+            }
+        }
+        1 => {
+            let form = build_photo_form(&image_paths[0], message).await?;
+            let resp = graph_client()
+                .post(format!("{}/{}/photos", base, page_id))
+                .timeout(std::time::Duration::from_secs(PHOTO_UPLOAD_TIMEOUT_SECS))
+                .bearer_auth(token)
+                .multipart(form)
+                .send()
+                .await
+                .map_err(network_failure)?;
+            let status = resp.status().as_u16();
+            let headers = resp.headers().clone();
+            let body = resp.text().await.map_err(body_read_failure)?;
+            if (200..300).contains(&status) {
+                parse_json_response(&body)
+            } else {
+                Err(graph_failure_from_response(status, &headers, &body))
+            }
+        }
+        _ => {
+            let mut media_fbids = Vec::with_capacity(image_paths.len());
+            for path in image_paths {
+                // Tuần tự: dừng ngay ở ảnh lỗi đầu tiên, không tạo bài.
+                media_fbids.push(upload_unpublished_photo(base, token, page_id, path).await?);
+            }
+            post_multi_photo_feed(base, token, page_id, message, &media_fbids).await
+        }
+    }
+}
+
+#[cfg(test)]
+async fn publish_with(
+    base: &str,
+    token: &str,
+    page_id: &str,
+    message: &str,
+    image_path: Option<&str>,
+) -> Result<serde_json::Value, GraphFailure> {
+    let paths: Vec<String> = image_path.map(|p| vec![p.to_string()]).unwrap_or_default();
+    publish_images_with(base, token, page_id, message, &paths).await
+}
+
 #[tauri::command]
 pub async fn publish_content<R: Runtime>(
     app: AppHandle<R>,
     page_id: String,
     message: String,
     image_path: Option<String>,
+    image_paths: Option<Vec<String>>,
 ) -> Result<serde_json::Value, String> {
-    publish_content_classified(app, page_id, message, image_path)
+    let paths = match image_paths {
+        Some(v) => v,
+        None => image_path.into_iter().collect(),
+    };
+    publish_content_classified_multi(app, page_id, message, paths)
         .await
         .map_err(|e| e.to_string())
 }
@@ -660,7 +841,21 @@ pub async fn get_post_insights<R: Runtime>(app: AppHandle<R>, post_id: String) -
 mod tests {
     use super::*;
     use wiremock::matchers::{header, method, path, query_param_is_missing};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use wiremock::{Match, Mock, MockServer, Request, ResponseTemplate};
+
+    /// `body_string_contains` rejects bodies that are not valid UTF-8, and a
+    /// multipart upload carrying image bytes never is. Match a byte
+    /// subsequence instead so the photo mocks can key off the filename.
+    struct BodyContainsBytes(Vec<u8>);
+
+    impl Match for BodyContainsBytes {
+        fn matches(&self, request: &Request) -> bool {
+            request
+                .body
+                .windows(self.0.len())
+                .any(|window| window == self.0.as_slice())
+        }
+    }
 
     #[test]
     fn test_parse_me_response_ok() {
@@ -882,7 +1077,7 @@ mod tests {
         let page_id = (uuid::Uuid::new_v4().as_u128() % 1_000_000_000_000_000_000u128).to_string();
         let key = page_token_key(&page_id);
         crate::security::set_secret_hybrid(Some(&handle), &key, "mock_page_token_abc123456").unwrap();
-        let result = crate::facebook::publish_content(handle.clone(), page_id.clone(), "hello".into(), None)
+        let result = crate::facebook::publish_content(handle.clone(), page_id.clone(), "hello".into(), None, None)
             .await
             .unwrap();
         assert_eq!(result["id"], "mock_photo_123");
@@ -1154,5 +1349,239 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err, "Post ID không hợp lệ.");
+    }
+
+    // --- Multi-image posting ---
+
+    #[test]
+    fn normalize_image_paths_rejects_empty_path() {
+        let err = normalize_image_paths(vec!["a.png".to_string(), "  ".to_string()]).unwrap_err();
+        assert_eq!(err.kind, GraphFailureKind::InvalidParam);
+        assert_eq!(
+            normalize_image_paths(vec![" a.png ".to_string()]).unwrap(),
+            vec!["a.png".to_string()]
+        );
+    }
+
+    #[test]
+    fn validate_image_count_rejects_eleven_and_accepts_ten() {
+        assert!(validate_image_count(0).is_ok());
+        assert!(validate_image_count(10).is_ok());
+        let err = validate_image_count(11).unwrap_err();
+        assert!(err.contains("tối đa 10"), "{}", err);
+        assert!(err.contains("11"), "{}", err);
+    }
+
+    #[test]
+    fn multi_photo_feed_params_shape() {
+        let params = multi_photo_feed_params("cap", &["p1".to_string(), "p2".to_string()]);
+        assert_eq!(params[0], ("message".to_string(), "cap".to_string()));
+        assert_eq!(params.len(), 3);
+        for (i, expected) in ["p1", "p2"].iter().enumerate() {
+            let key = format!("attached_media[{}]", i);
+            let (k, value) = params
+                .iter()
+                .find(|(k, _)| k == &key)
+                .expect("thiếu khoá attached_media");
+            assert_eq!(k, &key);
+            let parsed: serde_json::Value = serde_json::from_str(value).unwrap();
+            assert_eq!(parsed["media_fbid"], serde_json::json!(expected));
+        }
+    }
+
+    const PNG_1PX: &[u8] = &[
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F,
+        0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00,
+        0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49,
+        0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+    ];
+
+    fn temp_png(tag: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "flowpost_{}_{}.png",
+            tag,
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, PNG_1PX).unwrap();
+        path
+    }
+
+    #[tokio::test]
+    async fn publish_photo_unpublished_form_has_published_false_and_no_message() {
+        let img_path = temp_png("unpublished");
+        // Form không đọc trực tiếp được (không thêm crate mới), nên gửi form đã
+        // dựng tới wiremock để bắt đúng bytes multipart được serialize.
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/123/photos"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": "p1"})))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let form = build_unpublished_photo_form(img_path.to_string_lossy().as_ref())
+            .await
+            .unwrap();
+        graph_client()
+            .post(format!("{}/123/photos", server.uri()))
+            .multipart(form)
+            .send()
+            .await
+            .unwrap();
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        let body = String::from_utf8_lossy(&requests[0].body).to_string();
+        assert!(body.contains("name=\"source\""), "thiếu source: {}", body);
+        assert!(body.contains("name=\"published\""), "thiếu published: {}", body);
+        assert!(body.contains("false"), "thiếu false: {}", body);
+        assert!(!body.contains("name=\"message\""), "không được có message: {}", body);
+
+        std::fs::remove_file(&img_path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn publish_multi_photo_uploads_unpublished_then_feed() {
+        let p1 = temp_png("multi_a");
+        let p2 = temp_png("multi_b");
+        let name1 = p1.file_name().unwrap().to_string_lossy().to_string();
+        let name2 = p2.file_name().unwrap().to_string_lossy().to_string();
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/123/photos"))
+            .and(header("Authorization", "Bearer test-token"))
+            .and(BodyContainsBytes(name1.as_bytes().to_vec()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": "p1"})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/123/photos"))
+            .and(header("Authorization", "Bearer test-token"))
+            .and(BodyContainsBytes(name2.as_bytes().to_vec()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": "p2"})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/123/feed"))
+            .and(header("Authorization", "Bearer test-token"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": "123_42"})),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let result = publish_images_with(
+            server.uri().as_str(),
+            "test-token",
+            "123",
+            "caption",
+            &[p1.to_string_lossy().to_string(), p2.to_string_lossy().to_string()],
+        )
+        .await
+        .unwrap();
+        assert_eq!(result["id"], "123_42");
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 3, "phải là 2 upload + 1 feed");
+
+        let mut photo_bodies = Vec::new();
+        let mut feed_body = String::new();
+        for request in &requests {
+            let body = String::from_utf8_lossy(&request.body).to_string();
+            if request.url.path().ends_with("/photos") {
+                photo_bodies.push(body);
+            } else {
+                feed_body = body;
+            }
+            assert!(
+                !request.url.as_str().contains("access_token"),
+                "URL chứa token: {}",
+                request.url
+            );
+        }
+        assert_eq!(photo_bodies.len(), 2);
+        for body in &photo_bodies {
+            assert!(!body.contains("access_token"), "multipart chứa token: {}", body);
+            assert!(
+                !body.contains("name=\"message\""),
+                "multipart ảnh chưa công bố không được có message: {}",
+                body
+            );
+        }
+        assert!(feed_body.contains("attached_media"), "feed thiếu attached_media: {}", feed_body);
+        assert!(feed_body.contains("p1"), "feed thiếu p1: {}", feed_body);
+        assert!(feed_body.contains("p2"), "feed thiếu p2: {}", feed_body);
+        assert!(feed_body.contains("caption"), "feed thiếu caption: {}", feed_body);
+        assert!(!feed_body.contains("access_token"), "feed chứa token: {}", feed_body);
+
+        std::fs::remove_file(&p1).unwrap();
+        std::fs::remove_file(&p2).unwrap();
+    }
+
+    #[tokio::test]
+    async fn publish_multi_photo_aborts_without_feed_when_upload_fails() {
+        let p1 = temp_png("abort_a");
+        let p2 = temp_png("abort_b");
+        let name1 = p1.file_name().unwrap().to_string_lossy().to_string();
+        let name2 = p2.file_name().unwrap().to_string_lossy().to_string();
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/123/photos"))
+            .and(BodyContainsBytes(name1.as_bytes().to_vec()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": "p1"})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/123/photos"))
+            .and(BodyContainsBytes(name2.as_bytes().to_vec()))
+            .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+                "error": {"message": "bad photo", "code": 100}
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/123/feed"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": "should_not"})),
+            )
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let err = publish_images_with(
+            server.uri().as_str(),
+            "test-token",
+            "123",
+            "caption",
+            &[p1.to_string_lossy().to_string(), p2.to_string_lossy().to_string()],
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.kind, GraphFailureKind::InvalidParam);
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2, "không được gọi /feed sau khi upload lỗi");
+
+        std::fs::remove_file(&p1).unwrap();
+        std::fs::remove_file(&p2).unwrap();
+    }
+
+    #[tokio::test]
+    async fn publish_multi_photo_rejects_over_cap_before_network() {
+        // Cổng 1 không có service: nếu vượt cap không bị chặn, lỗi sẽ là Network.
+        let base = "http://127.0.0.1:1";
+        let paths: Vec<String> = (0..11).map(|i| format!("C:\\tmp\\img{}.png", i)).collect();
+        let err = publish_images_with(base, "t", "123", "caption", &paths)
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind, GraphFailureKind::InvalidParam);
+        assert!(err.message.contains("tối đa 10"), "{}", err.message);
     }
 }

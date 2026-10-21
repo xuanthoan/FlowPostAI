@@ -44,6 +44,7 @@ function formatBytes(bytes) {
 const charCount = (s) => [...(s || '')].length
 const STYLE_WARN_CHARS = 12000
 const VISIBLE_POLL_MS = 60_000
+const MAX_PUBLISH_IMAGES = 10
 
 function useVisiblePolling(callback, intervalMs, enabled = true) {
   const callbackRef = useRef(callback)
@@ -1011,7 +1012,7 @@ function PublishModal({ onClose, onSuccess }) {
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
   const [mediaItems, setMediaItems] = useState([])
-  const [selectedMediaId, setSelectedMediaId] = useState(null)
+  const [selectedMediaIds, setSelectedMediaIds] = useState([])
   const [showPicker, setShowPicker] = useState(false)
 
   // Load pages when modal opens (use empty token → backend lấy từ keyring)
@@ -1033,21 +1034,27 @@ function PublishModal({ onClose, onSuccess }) {
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => { if (showPicker) loadMedia() }, [showPicker])
 
+  const togglePublishMedia = (m) => {
+    setErr('')
+    if (m.mediaType !== 'image') { setErr('Chỉ hỗ trợ ảnh (jpg/jpeg/png/webp/gif)'); return }
+    if (selectedMediaIds.includes(m.id)) { setSelectedMediaIds(selectedMediaIds.filter(x => x !== m.id)); return }
+    if (selectedMediaIds.length >= MAX_PUBLISH_IMAGES) { setErr(`Chỉ chọn tối đa ${MAX_PUBLISH_IMAGES} ảnh mỗi bài`); return }
+    setSelectedMediaIds([...selectedMediaIds, m.id])
+  }
+
   const handlePublish = async () => {
     if (!pageId || !message.trim()) return
     setBusy(true); setErr(''); setMsg('')
     try {
-      let imagePath = null
-      if (selectedMediaId) {
-        const found = mediaItems.find(m => m.id === selectedMediaId)
-        if (found) imagePath = found.path
-      }
-      const res = await invokeDesktop('publish_content', { page_id: pageId, message, image_path: imagePath })
+      const paths = selectedMediaIds.map(id => mediaItems.find(m => m.id === id)).filter(Boolean).map(m => m.path)
+      const res = await invokeDesktop('publish_content', { page_id: pageId, message, image_path: paths[0] ?? null, image_paths: paths })
       setMsg(`Đã đăng thành công (post ID: ${res.id || 'unknown'})`)
       onSuccess && onSuccess()
       setTimeout(onClose, 1500)
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
+
+  const selectedImages = selectedMediaIds.map(id => mediaItems.find(m => m.id === id)).filter(Boolean)
 
   return (
     <div style={{position:'fixed', inset:0, background:'#0008', display:'grid', placeItems:'center', zIndex:60}} onClick={onClose}>
@@ -1062,19 +1069,23 @@ function PublishModal({ onClose, onSuccess }) {
         <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{charCount(message)} ký tự</div>
         <div>
           <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:4}}>
-            <label style={{fontSize:13, fontWeight:700}}>Ảnh đính kèm (tùy chọn, 1 ảnh đầu)</label>
+            <label style={{fontSize:13, fontWeight:700}}>Ảnh đính kèm (tùy chọn, tối đa 10 ảnh)</label>
             <button className="outline" onClick={()=>setShowPicker(v=>!v)} disabled={!desktop || busy} style={{height:30, fontSize:13}}><Images size={12}/> {showPicker ? 'Ẩn' : 'Chọn ảnh'}</button>
           </div>
           {!desktop && showPicker && <div style={{fontSize:12, color:'#777', marginTop:4}}>Chọn ảnh chỉ hoạt động trong bản Tauri Desktop</div>}
           {showPicker && <div style={{marginTop:8, maxHeight:160, overflowY:'auto', border:'1px solid #eee', borderRadius:8, padding:8, background:'#fafafa'}}>
             {mediaItems.length ? <div style={{display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:6}}>
-              {mediaItems.map(m => <div key={m.id} onClick={()=>setSelectedMediaId(prev=> prev===m.id ? null : m.id)} style={{border: selectedMediaId===m.id ? '2px solid #6558d6' : '1px solid #e8e8ed', borderRadius:8, overflow:'hidden', cursor:'pointer', background:'#fff'}}>
+              {mediaItems.map(m => <div key={m.id} onClick={()=>togglePublishMedia(m)} title={m.mediaType==='image' ? undefined : 'Chỉ hỗ trợ ảnh'} style={{border: selectedMediaIds.includes(m.id) ? '2px solid #6558d6' : '1px solid #e8e8ed', borderRadius:8, overflow:'hidden', cursor: m.mediaType==='image' ? 'pointer' : 'not-allowed', opacity: m.mediaType==='image' ? 1 : 0.55, background:'#fff'}}>
                 <div style={{aspectRatio:1, overflow:'hidden', background:'#f5f5f5', display:'grid', placeItems:'center'}}>{m.mediaType==='image' ? <img src={m.url} alt={m.name} style={{width:'100%', height:'100%', objectFit:'cover'}}/> : <><video src={m.url} style={{width:'100%', height:'100%', objectFit:'cover'}}/><div style={{fontSize:11, color:'#777'}}><Film size={10}/> VIDEO</div></>}</div>
-                <div style={{padding:4, fontSize:11, textAlign:'center', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', background: selectedMediaId===m.id ? '#f0eefc' : '#fff', color: selectedMediaId===m.id ? '#6558d6' : '#333'}}>{selectedMediaId===m.id ? '✓ ' : ''}{m.name}</div>
+                <div style={{padding:4, fontSize:11, textAlign:'center', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', background: selectedMediaIds.includes(m.id) ? '#f0eefc' : '#fff', color: selectedMediaIds.includes(m.id) ? '#6558d6' : '#333'}}>{selectedMediaIds.includes(m.id) ? '✓ ' : ''}{m.name}</div>
               </div>)}
             </div> : <span style={{fontSize:13, color:'#777'}}>Thư viện trống — hãy nhập media trước</span>}
           </div>}
-          {selectedMediaId && <div style={{fontSize:12, color:'#6558d6', marginTop:4}}>Đã chọn 1 ảnh để đăng kèm (ảnh đầu)</div>}
+          {selectedMediaIds.length > 0 && <div style={{fontSize:12, color:'#6558d6', marginTop:4, display:'flex', alignItems:'center', gap:6, flexWrap:'wrap'}}>
+            <span>Đã chọn {selectedMediaIds.length} ảnh để đăng kèm</span>
+            {selectedImages.slice(0,4).map(m => <img key={m.id} src={m.url} alt={m.name} style={{width:28, height:28, objectFit:'cover', borderRadius:4, border:'1px solid #e8e8ed'}}/>)}
+            {selectedImages.length > 4 && <span>+{selectedImages.length - 4}</span>}
+          </div>}
         </div>
         {err && <div className="error-box" style={{marginTop:8}}>{err}</div>}
         {msg && <div className="desktop-notice" style={{background:'#eef7ee', borderColor:'#cde9cd', color:'#2e6b2e', marginTop:8, padding:8}}><CircleCheck size={14}/><span>{msg}</span></div>}

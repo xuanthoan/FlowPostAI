@@ -127,9 +127,12 @@ window.__TAURI_INTERNALS__ = {};
       case 'publish_content': {
         const pid = (args?.page_id || args?.pageId || '').trim();
         const msg = (args?.message || '').trim();
+        const imgs = Array.isArray(args?.image_paths)
+          ? args.image_paths
+          : (args?.image_path ? [args.image_path] : []);
         if (!pid) throw new Error('Thiếu pageId');
         if (!msg) throw new Error('Vui lòng nhập nội dung');
-        return { id: 'mock_post_123' };
+        return { id: 'mock_post_123', imageCount: imgs.length };
       }
       case 'credential_status':
         return { hasFacebookToken: true };
