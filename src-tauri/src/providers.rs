@@ -57,7 +57,7 @@ pub struct CreateProviderPayload {
     pub models: Option<Vec<String>>,
     #[serde(default)]
     pub default_model: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_image_model: Option<String>,
     pub api_key: Option<String>,
 }
@@ -71,7 +71,7 @@ pub struct UpdateProviderPayload {
     pub models: Option<Vec<String>>,
     #[serde(default)]
     pub default_model: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_image_model: Option<String>,
     pub api_key: Option<String>,
 }

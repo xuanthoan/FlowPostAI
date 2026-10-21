@@ -156,26 +156,33 @@ pub fn pick_image_folder() -> Result<Option<String>, String> {
 // --- Pure helpers ---
 
 pub(crate) fn build_image_prompt(style_content: &str, title: &str, body: &str) -> String {
+    const HEADER: &str = IMAGE_PROMPT_HEADER;
+    const TITLE_MAX_CHARS: usize = 1000;
+
     let style = style_content.trim();
     let title = title.trim();
-    let body = body.trim();
+    let header_chars = HEADER.chars().count();
 
-    let mut prefix = String::new();
-    prefix.push_str(style);
-    prefix.push_str("\n\n");
-    prefix.push_str(IMAGE_PROMPT_HEADER);
-    if !title.is_empty() {
-        prefix.push('\n');
-        prefix.push_str(title);
-    }
-    prefix.push_str("\n\n");
+    // Reserve the header, the separators, and the (capped) title so the composed
+    // prompt can never be dominated by an unbounded style blob.
+    let title_budget = if title.is_empty() { 0 } else { TITLE_MAX_CHARS };
+    let style_budget =
+        IMAGE_PROMPT_MAX_TOTAL_CHARS.saturating_sub(header_chars + 4 + title_budget + 1);
+    let style_part: String = style.chars().take(style_budget).collect();
+    let title_part: String = title.chars().take(title_budget).collect();
 
-    let prefix_chars = prefix.chars().count();
-    let body_budget = IMAGE_PROMPT_MAX_BODY_CHARS.min(
-        IMAGE_PROMPT_MAX_TOTAL_CHARS.saturating_sub(prefix_chars),
-    );
-    let body: String = body.chars().take(body_budget).collect();
-    format!("{}{}", prefix, body)
+    let prefix = if title_part.is_empty() {
+        format!("{}\n\n{}\n\n", style_part, HEADER)
+    } else {
+        format!("{}\n\n{}\n{}\n\n", style_part, HEADER, title_part)
+    };
+
+    let body_budget = IMAGE_PROMPT_MAX_BODY_CHARS
+        .min(IMAGE_PROMPT_MAX_TOTAL_CHARS.saturating_sub(prefix.chars().count()));
+    let body_part: String = body.trim().chars().take(body_budget).collect();
+
+    let prompt = format!("{}{}", prefix, body_part);
+    prompt.chars().take(IMAGE_PROMPT_MAX_TOTAL_CHARS).collect()
 }
 
 pub(crate) fn encode_image_request(model: &str, prompt: &str, size: &str) -> serde_json::Value {
@@ -633,6 +640,42 @@ mod tests {
         assert_eq!(prompt.chars().count(), IMAGE_PROMPT_MAX_TOTAL_CHARS);
         assert!(prompt.starts_with(&style));
         assert!(prompt.contains(&title));
+    }
+
+    #[test]
+    fn build_image_prompt_caps_total_with_huge_style() {
+        let style = "s".repeat(7000);
+        let title = "t".repeat(7000);
+        let body = "b".repeat(5000);
+        let prompt = build_image_prompt(&style, &title, &body);
+        assert!(prompt.chars().count() <= IMAGE_PROMPT_MAX_TOTAL_CHARS);
+        assert!(prompt.contains("Minh hoạ cho bài viết sau"));
+        // A huge style blob must not squeeze out the header/title.
+        assert!(prompt.chars().any(|c| c != 's'));
+    }
+
+    #[test]
+    fn build_image_prompt_caps_total_with_huge_title() {
+        let style = "phong cách";
+        let title = "t".repeat(7000);
+        let body = "b".repeat(5000);
+        let prompt = build_image_prompt(style, &title, &body);
+        assert!(prompt.chars().count() <= IMAGE_PROMPT_MAX_TOTAL_CHARS);
+        assert!(prompt.contains("Minh hoạ cho bài viết sau"));
+    }
+
+    #[test]
+    fn build_image_prompt_body_still_capped_at_4000() {
+        let body = "b".repeat(20_000);
+
+        let normal = build_image_prompt("phong cách", "Tiêu đề", &body);
+        let normal_run = normal.chars().rev().take_while(|c| *c == 'b').count();
+        assert_eq!(normal_run, IMAGE_PROMPT_MAX_BODY_CHARS);
+
+        let huge_style = "s".repeat(7000);
+        let huge = build_image_prompt(&huge_style, "", &body);
+        let huge_run = huge.chars().rev().take_while(|c| *c == 'b').count();
+        assert!(huge_run <= IMAGE_PROMPT_MAX_BODY_CHARS);
     }
 
     #[test]
