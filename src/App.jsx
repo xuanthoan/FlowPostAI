@@ -43,6 +43,38 @@ function formatBytes(bytes) {
 // JS String.length counts UTF-16 units and would differ for astral emoji.
 const charCount = (s) => [...(s || '')].length
 const STYLE_WARN_CHARS = 12000
+const VISIBLE_POLL_MS = 60_000
+
+function useVisiblePolling(callback, intervalMs, enabled = true) {
+  const callbackRef = useRef(callback)
+  useEffect(() => { callbackRef.current = callback }, [callback])
+
+  useEffect(() => {
+    if (!enabled || typeof document === 'undefined') return
+    const visibilityEvent = 'visibilitychange'
+    let timer = null
+    const start = () => {
+      if (intervalMs > 0 && timer == null) timer = setInterval(() => callbackRef.current(), intervalMs)
+    }
+    const stop = () => {
+      if (timer != null) { clearInterval(timer); timer = null }
+    }
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        callbackRef.current()
+        start()
+      } else {
+        stop()
+      }
+    }
+    if (document.visibilityState === 'visible') start()
+    document.addEventListener(visibilityEvent, handleVisibility)
+    return () => {
+      stop()
+      document.removeEventListener(visibilityEvent, handleVisibility)
+    }
+  }, [intervalMs, enabled])
+}
 
 function MediaLibrary() {
   const [items, setItems] = useState([])
@@ -398,20 +430,20 @@ function SettingsPage() {
 function SettingsStatus() {
   const [status, setStatus] = useState({ hasFacebookToken: false, hasAiProviderKey: false })
   const desktop = isDesktop()
+  const load = async () => {
+    try {
+      const s = await invokeDesktop('credential_status')
+      let hasAi = false
+      try { const active = await invokeDesktop('get_active_provider'); hasAi = !!active.hasApiKey } catch (_e) { void _e }
+      setStatus({ hasFacebookToken: s.hasFacebookToken, hasAiProviderKey: hasAi })
+    } catch (_e) { void _e }
+  }
   useEffect(() => {
     if (!desktop) return
-    const load = async () => {
-      try {
-        const s = await invokeDesktop('credential_status')
-        let hasAi = false
-        try { const active = await invokeDesktop('get_active_provider'); hasAi = !!active.hasApiKey } catch (_e) { void _e }
-        setStatus({ hasFacebookToken: s.hasFacebookToken, hasAiProviderKey: hasAi })
-      } catch (_e) { void _e }
-    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load()
-    const id = setInterval(load, 4000)
-    return () => clearInterval(id)
   }, [desktop])
+  useVisiblePolling(load, VISIBLE_POLL_MS, desktop)
   const hasAny = status.hasFacebookToken || status.hasAiProviderKey
   return <div className="token-box"><div className="token-title"><span><Zap size={14}/> Bảo mật</span><b style={{color: hasAny ? '#2e7d32' : '#d87642'}}>{hasAny ? 'Đã lưu' : 'Chưa lưu'}</b></div><div className="progress"><i style={{width: status.hasFacebookToken && status.hasAiProviderKey ? '100%' : status.hasFacebookToken || status.hasAiProviderKey ? '50%' : '0%', background: hasAny ? '#4caf50' : '#e4a263'}}/></div><p>{status.hasFacebookToken ? 'FB Token ●●●●' : 'FB Token chưa lưu'} • {status.hasAiProviderKey ? 'AI Provider ●●●●' : 'AI Provider chưa lưu'}</p></div>
 }
@@ -1400,11 +1432,7 @@ function SchedulePage() {
   }
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { refresh() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (!desktop) return
-    const id = setInterval(refresh, 4000)
-    return () => clearInterval(id)
-  }, [desktop]) // eslint-disable-line react-hooks/exhaustive-deps
+  useVisiblePolling(refresh, VISIBLE_POLL_MS, desktop)
 
   const deleteItem = async (id) => {
     if (!window.confirm('Xóa lịch này?')) return
@@ -1533,21 +1561,21 @@ function DashboardSchedulePanel({ onViewAll, resolveStyleName }) {
   const desktop = isDesktop()
   const [todaySchedules, setTodaySchedules] = useState([])
   const [contentMap, setContentMap] = useState(new Map())
+  const load = async () => {
+    try {
+      const [s, c] = await Promise.all([invokeDesktop('list_schedule'), invokeDesktop('list_content')])
+      const todayStr = new Date().toDateString()
+      const todayList = s.filter(x => new Date(x.scheduledAt).toDateString() === todayStr && x.status === 'Scheduled').sort((a,b)=> new Date(a.scheduledAt) - new Date(b.scheduledAt)).slice(0,3)
+      setTodaySchedules(todayList)
+      setContentMap(new Map(c.map(x=>[x.id, x])))
+    } catch { /* ignore */ }
+  }
   useEffect(() => {
     if (!desktop) return
-    const load = async () => {
-      try {
-        const [s, c] = await Promise.all([invokeDesktop('list_schedule'), invokeDesktop('list_content')])
-        const todayStr = new Date().toDateString()
-        const todayList = s.filter(x => new Date(x.scheduledAt).toDateString() === todayStr && x.status === 'Scheduled').sort((a,b)=> new Date(a.scheduledAt) - new Date(b.scheduledAt)).slice(0,3)
-        setTodaySchedules(todayList)
-        setContentMap(new Map(c.map(x=>[x.id, x])))
-      } catch { /* ignore */ }
-    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load()
-    const id = setInterval(load, 4000)
-    return () => clearInterval(id)
   }, [desktop])
+  useVisiblePolling(load, VISIBLE_POLL_MS, desktop)
   const formatTime = (iso) => new Intl.DateTimeFormat('vi-VN', { hour:'2-digit', minute:'2-digit'}).format(new Date(iso))
   const dotColor = (platform) => platform==='Sống Tích Cực' ? 'purple-dot' : platform==='Daily Motivation' ? 'orange-dot' : 'green-dot'
   return <div className="panel schedule-panel">
@@ -1579,6 +1607,9 @@ function App() {
   const [dashboardEngagementRate, setDashboardEngagementRate] = useState('—')
   const [styleList, setStyleList] = useState([])
   const [hoveredRecent, setHoveredRecent] = useState(null)
+  const [graphLoading, setGraphLoading] = useState(false)
+  const [lastInsightsAt, setLastInsightsAt] = useState(null)
+  const graphLoadingRef = useRef(false)
   const desktop = isDesktop()
   const today = new Intl.DateTimeFormat('vi-VN', { weekday: 'long', day: '2-digit', month: 'long' }).format(new Date())
   const createPost = () => { setActive('AI Content'); setToast(true); setTimeout(() => setToast(false), 2600) }
@@ -1593,101 +1624,115 @@ function App() {
     return () => { cancelled = true }
   }, [desktop])
 
+  const loadLocal = async () => {
+    if (!desktop) return
+    try {
+      const [contents, schedules] = await Promise.all([invokeDesktop('list_content'), invokeDesktop('list_schedule')])
+      setContentCount(contents.length)
+      // Recent posts: 3 mới nhất từ content (fallback khi chưa có insights)
+      const recent = [...contents].sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt)).slice(0,3).map((c,i) => {
+        const styleLabel = resolveStyleLabel(styleList, c.style)
+        return {
+          title: c.title, page: styleLabel, date: new Date(c.createdAt).toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}),
+          type: c.mediaIds && c.mediaIds.length ? 'Ảnh + văn bản' : 'Văn bản', status: contentStatusLabel(c.status), color: ['#f0a86e','#7469d5','#4b9b7d'][i%3], initials: styleLabel.slice(0,2).toUpperCase(), reach: '—', likes: '—', comments: '—', pending: c.status !== 'approved', tooltip: '', tooltipData: { impressions:'—', unique:'—', engaged:'—', clicks:'—', reactions:'—', videoViews:'—' }
+        }
+      })
+      setDashboardRecent(recent)
+      setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights'); setDashboardEngagementRate('—')
+      // Stats
+      const now = new Date()
+      const thisMonthContents = contents.filter(c => { const d=new Date(c.createdAt); return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear() }).length
+      const published = schedules.filter(s=>s.status==='Published').length
+      const scheduled = schedules.filter(s=>s.status==='Scheduled').length
+      setDashboardPostsThisMonth(thisMonthContents)
+      setDashboardPublished(published)
+      setDashboardScheduled(scheduled)
+      // Chart 7 ngày gần nhất: đếm schedule Published+Scheduled theo ngày
+      const days = []
+      for (let i=6; i>=0; i--) {
+        const d = new Date(); d.setDate(now.getDate()-i)
+        const label = weekdayLabel(d)
+        const count = schedules.filter(s => { const sd=new Date(s.scheduledAt); return sd.toDateString()===d.toDateString() && (s.status==='Published' || s.status==='Scheduled') }).length
+        days.push({ day: label, posts: count, engagement: count })
+      }
+      setDashboardChartData(days)
+    } catch { /* ignore - keep previous */ }
+  }
+
+  const loadGraph = async (withInsights) => {
+    if (!desktop || graphLoadingRef.current) return
+    graphLoadingRef.current = true
+    setGraphLoading(true)
+    try {
+      const pages = await invokeDesktop('list_facebook_pages', { token: '' })
+      if (pages.length) {
+        const pageId = pages[0].id
+        const postsRes = await invokeDesktop('list_page_posts', { pageId, limit: 5 })
+        const fbPosts = postsRes?.data || (Array.isArray(postsRes) ? postsRes : [])
+        if (Array.isArray(fbPosts) && fbPosts.length) {
+          const getVal = (data, name) => {
+            const m = (data || []).find(x => x.name === name)
+            if (!m) return '—'
+            const v = m.values?.[0]?.value
+            if (v == null) return '—'
+            if (typeof v === 'object') return JSON.stringify(v)
+            return String(v)
+          }
+          const enriched = await Promise.all(fbPosts.slice(0,3).map(async (fp, idx) => {
+            try {
+              let data = []
+              if (withInsights === true) {
+                const ins = await invokeDesktop('get_post_insights', { postId: fp.id })
+                data = ins?.data || []
+              }
+              const msg = fp.message ? fp.message.slice(0,40) : fp.id
+              return {
+                title: msg, page: pages[0].name, date: new Date(fp.created_time).toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}),
+                type: fp.full_picture ? 'Ảnh + văn bản' : 'Văn bản', status: 'Đã đăng', color: ['#f0a86e','#7469d5','#4b9b7d'][idx%3], initials: pages[0].name.slice(0,2).toUpperCase(),
+                reach: getVal(data, 'post_impressions_unique'), likes: getVal(data, 'post_reactions_by_type_total'), comments: getVal(data, 'post_clicks'), pending: false,
+                tooltip: `Impressions: ${getVal(data,'post_impressions')} | Unique: ${getVal(data,'post_impressions_unique')} | Engaged: ${getVal(data,'post_engaged_users')} | Clicks: ${getVal(data,'post_clicks')} | Reactions: ${getVal(data,'post_reactions_by_type_total')} | VideoViews: ${getVal(data,'post_video_views')}`,
+                tooltipData: { impressions: getVal(data,'post_impressions'), unique: getVal(data,'post_impressions_unique'), engaged: getVal(data,'post_engaged_users'), clicks: getVal(data,'post_clicks'), reactions: getVal(data,'post_reactions_by_type_total'), videoViews: getVal(data,'post_video_views') }
+              }
+            } catch { return null }
+          }))
+          const filtered = enriched.filter(Boolean)
+          if (filtered.length) {
+            setDashboardRecent(filtered)
+            // Tính tổng tương tác và tỷ lệ từ insights
+            let total = 0
+            let totalUnique = 0
+            for (const r of filtered) {
+              const d = r.tooltipData
+              if (!d) continue
+              const engaged = Number(String(d.engaged).replace(/[^0-9.-]/g,'')) || 0
+              const clicks = Number(String(d.clicks).replace(/[^0-9.-]/g,'')) || 0
+              let reactionsNum = 0
+              try { const obj = JSON.parse(d.reactions); if (typeof obj === 'object' && obj !== null) reactionsNum = Object.values(obj).reduce((s,v)=> s + (Number(v)||0),0); else reactionsNum = Number(d.reactions)||0 } catch { reactionsNum = Number(String(d.reactions).replace(/[^0-9.-]/g,''))||0 }
+              total += engaged + clicks + reactionsNum
+              const unique = Number(String(d.unique).replace(/[^0-9.-]/g,'')) || 0
+              totalUnique += unique
+            }
+            if (total) { setDashboardTotalInteractions(String(total)); setDashboardTotalSub(`${filtered.length} bài có insights`) } else { setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights') }
+            if (total && totalUnique) { setDashboardEngagementRate(`${((total/totalUnique)*100).toFixed(1)}%`) } else { setDashboardEngagementRate('—') }
+          } else {
+            setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights'); setDashboardEngagementRate('—')
+          }
+        }
+        setLastInsightsAt(Date.now())
+      }
+    } catch { /* không có token read_insights thì giữ '—' */ } finally {
+      graphLoadingRef.current = false
+      setGraphLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (!desktop) return
-    const load = async () => {
-      try {
-        const [contents, schedules] = await Promise.all([invokeDesktop('list_content'), invokeDesktop('list_schedule')])
-        setContentCount(contents.length)
-        // Recent posts: 3 mới nhất từ content (fallback khi chưa có insights)
-        let recent = [...contents].sort((a,b)=> new Date(b.createdAt) - new Date(a.createdAt)).slice(0,3).map((c,i) => {
-          const styleLabel = resolveStyleLabel(styleList, c.style)
-          return {
-            title: c.title, page: styleLabel, date: new Date(c.createdAt).toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}),
-            type: c.mediaIds && c.mediaIds.length ? 'Ảnh + văn bản' : 'Văn bản', status: contentStatusLabel(c.status), color: ['#f0a86e','#7469d5','#4b9b7d'][i%3], initials: styleLabel.slice(0,2).toUpperCase(), reach: '—', likes: '—', comments: '—', pending: c.status !== 'approved', tooltip: '', tooltipData: { impressions:'—', unique:'—', engaged:'—', clicks:'—', reactions:'—', videoViews:'—' }
-          }
-        })
-        setDashboardRecent(recent)
-        setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights'); setDashboardEngagementRate('—')
-        // Thử lấy toàn bộ 6 metrics thật từ Graph API (post_impressions, post_impressions_unique, post_engaged_users, post_clicks, post_reactions_by_type_total, post_video_views)
-        try {
-          const pages = await invokeDesktop('list_facebook_pages', { token: '' })
-          if (pages.length) {
-            const pageId = pages[0].id
-            const postsRes = await invokeDesktop('list_page_posts', { pageId, limit: 5 })
-            const fbPosts = postsRes?.data || (Array.isArray(postsRes) ? postsRes : [])
-            if (Array.isArray(fbPosts) && fbPosts.length) {
-              const getVal = (data, name) => {
-                const m = (data || []).find(x => x.name === name)
-                if (!m) return '—'
-                const v = m.values?.[0]?.value
-                if (v == null) return '—'
-                if (typeof v === 'object') return JSON.stringify(v)
-                return String(v)
-              }
-              const enriched = await Promise.all(fbPosts.slice(0,3).map(async (fp, idx) => {
-                try {
-                  const ins = await invokeDesktop('get_post_insights', { postId: fp.id })
-                  const data = ins?.data || []
-                  const msg = fp.message ? fp.message.slice(0,40) : fp.id
-                  return {
-                    title: msg, page: pages[0].name, date: new Date(fp.created_time).toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}),
-                    type: fp.full_picture ? 'Ảnh + văn bản' : 'Văn bản', status: 'Đã đăng', color: ['#f0a86e','#7469d5','#4b9b7d'][idx%3], initials: pages[0].name.slice(0,2).toUpperCase(),
-                    reach: getVal(data, 'post_impressions_unique'), likes: getVal(data, 'post_reactions_by_type_total'), comments: getVal(data, 'post_clicks'), pending: false,
-                    tooltip: `Impressions: ${getVal(data,'post_impressions')} | Unique: ${getVal(data,'post_impressions_unique')} | Engaged: ${getVal(data,'post_engaged_users')} | Clicks: ${getVal(data,'post_clicks')} | Reactions: ${getVal(data,'post_reactions_by_type_total')} | VideoViews: ${getVal(data,'post_video_views')}`,
-                    tooltipData: { impressions: getVal(data,'post_impressions'), unique: getVal(data,'post_impressions_unique'), engaged: getVal(data,'post_engaged_users'), clicks: getVal(data,'post_clicks'), reactions: getVal(data,'post_reactions_by_type_total'), videoViews: getVal(data,'post_video_views') }
-                  }
-                } catch { return null }
-              }))
-              const filtered = enriched.filter(Boolean)
-              if (filtered.length) {
-                recent = filtered
-                setDashboardRecent(filtered)
-                // Tính tổng tương tác và tỷ lệ từ insights
-                let total = 0
-                let totalUnique = 0
-                for (const r of filtered) {
-                  const d = r.tooltipData
-                  if (!d) continue
-                  const engaged = Number(String(d.engaged).replace(/[^0-9.-]/g,'')) || 0
-                  const clicks = Number(String(d.clicks).replace(/[^0-9.-]/g,'')) || 0
-                  let reactionsNum = 0
-                  try { const obj = JSON.parse(d.reactions); if (typeof obj === 'object' && obj !== null) reactionsNum = Object.values(obj).reduce((s,v)=> s + (Number(v)||0),0); else reactionsNum = Number(d.reactions)||0 } catch { reactionsNum = Number(String(d.reactions).replace(/[^0-9.-]/g,''))||0 }
-                  total += engaged + clicks + reactionsNum
-                  const unique = Number(String(d.unique).replace(/[^0-9.-]/g,'')) || 0
-                  totalUnique += unique
-                }
-                if (total) { setDashboardTotalInteractions(String(total)); setDashboardTotalSub(`${filtered.length} bài có insights`) } else { setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights') }
-                if (total && totalUnique) { setDashboardEngagementRate(`${((total/totalUnique)*100).toFixed(1)}%`) } else { setDashboardEngagementRate('—') }
-              } else {
-                setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights'); setDashboardEngagementRate('—')
-              }
-            }
-          }
-        } catch { /* không có token read_insights thì giữ '—' */ }
-        // Stats
-        const now = new Date()
-        const thisMonthContents = contents.filter(c => { const d=new Date(c.createdAt); return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear() }).length
-        const published = schedules.filter(s=>s.status==='Published').length
-        const scheduled = schedules.filter(s=>s.status==='Scheduled').length
-        setDashboardPostsThisMonth(thisMonthContents)
-        setDashboardPublished(published)
-        setDashboardScheduled(scheduled)
-        // Chart 7 ngày gần nhất: đếm schedule Published+Scheduled theo ngày
-        const days = []
-        for (let i=6; i>=0; i--) {
-          const d = new Date(); d.setDate(now.getDate()-i)
-          const label = weekdayLabel(d)
-          const count = schedules.filter(s => { const sd=new Date(s.scheduledAt); return sd.toDateString()===d.toDateString() && (s.status==='Published' || s.status==='Scheduled') }).length
-          days.push({ day: label, posts: count, engagement: count })
-        }
-        setDashboardChartData(days)
-      } catch { /* ignore - keep previous */ }
-    }
-    load()
-    const id = setInterval(load, 4000)
-    return () => clearInterval(id)
-  }, [desktop, active, styleList])
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadLocal().then(() => loadGraph(false))
+  }, [desktop, active, styleList]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useVisiblePolling(loadLocal, 0, Boolean(desktop))
 
   return <div className="app-shell">
     <aside className="sidebar">
@@ -1723,7 +1768,7 @@ function App() {
         </section>
 
         <section className="panel recent">
-          <div className="panel-head"><div><h2>Bài viết gần đây</h2><p>Theo dõi trạng thái và hiệu quả bài đăng</p></div><button className="text-link">Xem tất cả <span>→</span></button></div>
+          <div className="panel-head"><div><h2>Bài viết gần đây</h2><p>Theo dõi trạng thái và hiệu quả bài đăng</p></div><div style={{display:'flex', alignItems:'center', gap:10}}>{lastInsightsAt && <span style={{fontSize:11, color:'#9e9ca5'}}>Cập nhật lúc {new Date(lastInsightsAt).toLocaleTimeString('vi-VN', { hour:'2-digit', minute:'2-digit' })}</span>}<button className="outline" style={{height:30}} onClick={() => loadGraph(true)} disabled={graphLoading}>{graphLoading ? 'Đang tải...' : 'Làm mới'}</button><button className="text-link">Xem tất cả <span>→</span></button></div></div>
           <div className="table-wrap"><table><thead><tr><th>NỘI DUNG</th><th>TRANG</th><th>THỜI GIAN</th><th>LOẠI</th><th>TRẠNG THÁI</th><th>TIẾP CẬN</th><th>TƯƠNG TÁC</th><th></th></tr></thead><tbody>{dashboardRecent.length ? dashboardRecent.map((p, i) => <tr key={p.title + i} onMouseEnter={()=>setHoveredRecent(i)} onMouseLeave={()=>setHoveredRecent(null)} style={{position:'relative'}}><td><div className="post-title"><div className={`thumb thumb${i+1}`}>{i === 0 ? '☀️' : i === 1 ? '“' : '▶'}</div><strong>{p.title}</strong></div></td><td><div className="page"><i style={{background:p.color}}>{p.initials}</i>{p.page}</div></td><td>{p.date}</td><td><span className="type">{p.type}</span></td><td><span className={p.pending ? 'status pending' : 'status success'}>{p.pending ? <Clock3 size={13}/> : <CircleCheck size={13}/>} {p.pending ? 'Đang xử lý' : p.status}</span></td><td style={{position:'relative'}}><strong>{p.reach}</strong>{hoveredRecent===i && p.tooltipData && p.tooltipData.impressions!=='—' && <div style={{position:'absolute', top:'100%', left:0, background:'#fff', border:'1px solid #e9e9ee', borderRadius:8, boxShadow:'0 8px 24px #2222', padding:10, zIndex:10, minWidth:240}}><div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 12px', fontSize:13}}><span style={{color:'#777'}}>Impressions</span><b>{p.tooltipData.impressions}</b><span style={{color:'#777'}}>Unique</span><b>{p.tooltipData.unique}</b><span style={{color:'#777'}}>Engaged</span><b>{p.tooltipData.engaged}</b><span style={{color:'#777'}}>Clicks</span><b>{p.tooltipData.clicks}</b><span style={{color:'#777'}}>Reactions</span><b style={{wordBreak:'break-all'}}>{p.tooltipData.reactions}</b><span style={{color:'#777'}}>VideoViews</span><b>{p.tooltipData.videoViews}</b></div></div>}</td><td style={{position:'relative'}}><div className="engage"><span><Heart size={14}/> {p.likes || '—'}</span><span><MessageCircle size={14}/> {p.comments || '—'}</span></div>{hoveredRecent===i && p.tooltipData && p.tooltipData.impressions!=='—' && <div style={{position:'absolute', top:'100%', right:0, background:'#fff', border:'1px solid #e9e9ee', borderRadius:8, boxShadow:'0 8px 24px #2222', padding:10, zIndex:10, minWidth:240}}><div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 12px', fontSize:13}}><span style={{color:'#777'}}>Impressions</span><b>{p.tooltipData.impressions}</b><span style={{color:'#777'}}>Unique</span><b>{p.tooltipData.unique}</b><span style={{color:'#777'}}>Engaged</span><b>{p.tooltipData.engaged}</b><span style={{color:'#777'}}>Clicks</span><b>{p.tooltipData.clicks}</b><span style={{color:'#777'}}>Reactions</span><b style={{wordBreak:'break-all'}}>{p.tooltipData.reactions}</b><span style={{color:'#777'}}>VideoViews</span><b>{p.tooltipData.videoViews}</b></div></div>}</td><td><button className="row-more" aria-label="Thao tác"><MoreHorizontal size={18}/></button></td></tr>) : <tr><td colSpan={8} style={{textAlign:'center', padding:20, color:'#777', fontSize:14}}>Chưa có bài viết — hãy tạo nội dung ở AI Content</td></tr>}</tbody></table></div>
         </section>
         </>}

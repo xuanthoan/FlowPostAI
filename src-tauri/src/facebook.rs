@@ -115,6 +115,10 @@ mod urlencoding {
     }
 }
 
+fn should_write_page_token(existing: Option<&str>, incoming: &str) -> bool {
+    existing != Some(incoming)
+}
+
 #[tauri::command]
 pub async fn list_facebook_pages<R: Runtime>(app: AppHandle<R>, token: String) -> Result<Vec<PageInfo>, String> {
     let token = token.trim().to_string();
@@ -160,7 +164,10 @@ pub async fn list_facebook_pages<R: Runtime>(app: AppHandle<R>, token: String) -
                     raw.get("access_token").and_then(|x| x.as_str()),
                 ) {
                     let key = page_token_key(id);
-                    let _ = crate::security::set_secret_hybrid(Some(&app), &key, at);
+                    let current = crate::security::get_secret_hybrid(Some(&app), &key).ok().flatten();
+                    if !at.is_empty() && should_write_page_token(current.as_deref(), at) {
+                        let _ = crate::security::set_secret_hybrid(Some(&app), &key, at);
+                    }
                     pages.push(PageInfo { id: id.to_string(), name: name.to_string() });
                 }
             }
@@ -451,6 +458,21 @@ mod tests {
     fn test_page_token_key_format() {
         assert_eq!(page_token_key("123"), "fb_page_123");
         assert_eq!(page_token_key("abc"), "fb_page_abc");
+    }
+
+    #[test]
+    fn test_should_write_page_token_when_missing() {
+        assert!(should_write_page_token(None, "abc"));
+    }
+
+    #[test]
+    fn test_should_not_write_page_token_when_unchanged() {
+        assert!(!should_write_page_token(Some("abc"), "abc"));
+    }
+
+    #[test]
+    fn test_should_write_page_token_when_changed() {
+        assert!(should_write_page_token(Some("abc"), "xyz"));
     }
 
     #[test]
