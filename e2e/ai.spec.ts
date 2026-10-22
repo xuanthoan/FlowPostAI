@@ -6,7 +6,7 @@ const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:20128/v1';
 
 const mockImplCode = `
 window.__TAURI_MOCK__ = true;
-window.__TAURI_INTERNALS__ = { invoke: (cmd, args) => window.__TAURI_MOCK_IMPL__(cmd, args) };
+window.__TAURI_INTERNALS__ = { invoke: (cmd, args) => window.__TAURI_MOCK_IMPL__(cmd, args), convertFileSrc: (p) => 'asset://localhost/' + encodeURIComponent(p) };
 window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
   const baseUrl = ${JSON.stringify(BASE_URL)};
   if (cmd === 'generate_content') {
@@ -57,6 +57,35 @@ window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
       defaultModel: 'text-model',
       hasApiKey: true,
     };
+  }
+  if (cmd === 'list_image_styles') {
+    return [
+      { id: 'cinematic', name: 'Điện ảnh', content: 'Ánh sáng điện ảnh, không có chữ.', builtin: true },
+      { id: 'minimal', name: 'Tối giản', content: 'Nền tối giản, không có chữ.', builtin: true },
+      { id: 'illustration', name: 'Minh hoạ phẳng', content: 'Minh hoạ phẳng, không có chữ.', builtin: true },
+    ];
+  }
+  if (cmd === 'get_image_config') {
+    return { providerId: 'p1', model: 'img-model', saveDir: '', styleId: 'cinematic', size: '1024x1024' };
+  }
+  if (cmd === 'set_image_config') {
+    window.__LAST_IMAGE_CONFIG__ = args?.config ?? null;
+    return args?.config ?? {};
+  }
+  if (cmd === 'pick_image_folder') return 'C:\\\\tmp\\\\flowpost';
+  if (cmd === 'generate_image') {
+    window.__LAST_IMAGE_PAYLOAD__ = args?.payload ?? null;
+    if (window.__FAIL_IMAGE__) throw new Error('AI tạo ảnh đang gặp sự cố, vui lòng thử lại.');
+    const p = args?.payload ?? {};
+    if (!String(p.title || '').trim() && !String(p.body || '').trim()) throw new Error('Chưa có nội dung bài viết để tạo ảnh.');
+    return {
+      mediaId: 'img-1', path: 'C:\\\\tmp\\\\flowpost.png', name: 'AI.png', extension: 'png', size: 1234,
+      model: p.model || 'img-model', styleId: p.styleId || 'cinematic', savedCopyPath: null,
+    };
+  }
+  if (cmd === 'list_media') return [];
+  if (cmd === 'list_providers') {
+    return [{ id: 'p1', displayName: 'P1', baseUrl: 'http://127.0.0.1:20128/v1', protocol: 'openai-completions', models: ['text-model'], defaultModel: 'text-model', defaultImageModel: 'img-model', hasApiKey: true }];
   }
   throw new Error('Unknown mock command: ' + cmd);
 };
@@ -128,5 +157,32 @@ test.describe('AI generate_content E2E (real server)', () => {
     } catch (e) {
       expect(String(e)).toContain('prompt');
     }
+  });
+
+  test('AI Content generates an image when the checkbox is enabled', async ({ page }) => {
+    await page.getByRole('button', { name: 'AI Content', exact: true }).click();
+    await page.getByLabel('Tạo ảnh minh hoạ bằng AI').check();
+    await page.getByPlaceholder('VD: Bí quyết năng lượng buổi sáng cho dân văn phòng...').fill('Bí quyết năng lượng buổi sáng');
+    await page.getByRole('button', { name: 'Tạo nội dung', exact: true }).click();
+    await expect(page.getByText('Đã tạo ảnh minh hoạ')).toBeVisible();
+    const imgPayload: any = await page.evaluate(() => (window as any).__LAST_IMAGE_PAYLOAD__);
+    expect(imgPayload).toBeTruthy();
+    expect(imgPayload.title).toBeTruthy();
+    expect(imgPayload.body).toBeTruthy();
+    expect(imgPayload.styleId).toBe('cinematic');
+    await expect(page.getByText('Đã gắn vào bài viết')).toBeVisible();
+    await expect(page.getByText('Gắn media (1)')).toBeVisible();
+  });
+
+  test('AI Content keeps the text when image generation fails', async ({ page }) => {
+    await page.getByRole('button', { name: 'AI Content', exact: true }).click();
+    await page.getByLabel('Tạo ảnh minh hoạ bằng AI').check();
+    await page.evaluate(() => { (window as any).__FAIL_IMAGE__ = true; });
+    await page.getByPlaceholder('VD: Bí quyết năng lượng buổi sáng cho dân văn phòng...').fill('Chủ đề lỗi ảnh');
+    await page.getByRole('button', { name: 'Tạo nội dung', exact: true }).click();
+    await expect(page.getByText('Đã tạo nội dung')).toBeVisible();
+    await expect(page.getByText('AI tạo ảnh đang gặp sự cố')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Thử tạo lại ảnh' })).toBeVisible();
+    await expect(page.locator('textarea').nth(1)).toHaveValue('Nội dung được tạo bởi mock');
   });
 });

@@ -73,6 +73,17 @@ FlowPost AI dùng token do bạn tự tạo và dán vào ứng dụng. Token c�
 
 > Tip: User Token ngắn hạn 1-2h nên đổi sang dài hạn 60 ngày: `GET /oauth/access_token?grant_type=fb_exchange_token&client_id={app_id}&client_secret={app_secret}&fb_exchange_token={short_token}` — chỉ cần khi bạn có `APP_ID/SECRET` (FlowPost AI không lưu, bạn tự đổi trên Graph Explorer). Khi hết hạn (`code 190`) chỉ cần tạo token mới, dán lại và `Tải Trang` lại, không cần `APP_ID/SECRET` trong app (tránh lộ secret trên desktop).
 
+## Tạo ảnh minh hoạ bằng AI
+
+- Trong `AI Content`, tick `Tạo ảnh minh hoạ bằng AI` (mặc định tắt). Sau khi AI trả về bài viết, ứng dụng gọi model tạo ảnh để sinh **1 ảnh** dựa trên tiêu đề + nội dung bài viết và `Style ảnh` đang chọn.
+- `Style ảnh` là danh sách riêng (`image_styles.json`), có 3 style mặc định (`Điện ảnh`, `Tối giản`, `Minh hoạ phẳng`) và cho phép thêm/sửa/nhân bản/xóa/khôi phục mặc định. Style ảnh chỉ chứa mô tả phong cách, không phải nội dung bài viết.
+- Chọn model tạo ảnh riêng: `Cài đặt` → `Providers` → `Model mặc định để tạo ảnh`, hoặc chọn `Provider tạo ảnh` + `Model tạo ảnh` + `Kích thước` ngay trong khối tạo ảnh ở `AI Content`. Model viết bài vẫn dùng mục `Model` riêng.
+- Ứng dụng gọi `POST {base}/images/generations` theo chuẩn OpenAI-compatible với `n=1`, `response_format=b64_json`; nếu provider trả `url`, backend tự tải ảnh về (không gửi API key tới host tải ảnh).
+- Ảnh luôn được lưu vào thư viện media của ứng dụng (`media/`) và được gắn vào bài viết để xem trước/đăng kèm. Nếu bạn chọn `Thư mục lưu ảnh`, ứng dụng ghi thêm một bản sao vào thư mục đó; lỗi ghi bản sao chỉ là cảnh báo, ảnh trong thư viện vẫn dùng được.
+- Giới hạn: 1 ảnh mỗi lần tạo; ảnh phải là PNG/JPEG/WEBP/GIF và không quá 10MB; kích thước hỗ trợ `1024x1024`, `1024x1536`, `1536x1024`.
+- Nếu tạo ảnh lỗi, bài viết đã tạo vẫn giữ nguyên; bấm `Thử tạo lại ảnh`. Ảnh không được tạo tự động khi bạn chỉ lưu bài viết.
+- Cấu hình ảnh được lưu trong `image-config.json` (provider/model/style/thư mục/kích thước).
+
 ## Khi gặp lỗi token hoặc app bị hạn chế
 
 - Mã 190 nghĩa là access token không hợp lệ, đã hết hạn hoặc đã bị thu hồi. Không tạo app Meta mới để khắc phục.

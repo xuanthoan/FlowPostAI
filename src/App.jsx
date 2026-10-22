@@ -43,6 +43,8 @@ function formatBytes(bytes) {
 // JS String.length counts UTF-16 units and would differ for astral emoji.
 const charCount = (s) => [...(s || '')].length
 const STYLE_WARN_CHARS = 12000
+const IMAGE_SIZES = ['1024x1024', '1024x1536', '1536x1024']
+const DEFAULT_IMAGE_STYLE_ID = 'cinematic'
 const VISIBLE_POLL_MS = 60_000
 const MAX_PUBLISH_IMAGES = 10
 
@@ -122,7 +124,7 @@ function ProvidersPanel() {
   const desktop = isDesktop()
   const [providers, setProviders] = useState([])
   const [activeId, setActiveId] = useState('')
-  const [form, setForm] = useState({ id: '', displayName: '', baseUrl: DEFAULT_LOCAL_BASE_URL, apiKey: '', models: [], defaultModel: '' })
+  const [form, setForm] = useState({ id: '', displayName: '', baseUrl: DEFAULT_LOCAL_BASE_URL, apiKey: '', models: [], defaultModel: '', defaultImageModel: '' })
   const [presetKey, setPresetKey] = useState('')
   const [hasApiKey, setHasApiKey] = useState(false)
   const [modelInput, setModelInput] = useState('')
@@ -144,7 +146,7 @@ function ProvidersPanel() {
           if (found) active = found
         } catch (_e) { void _e }
         setActiveId(active.id)
-        setForm({ id: active.id, displayName: active.displayName || active.id, baseUrl: active.baseUrl, apiKey: '', models: active.models || [], defaultModel: active.defaultModel || '' })
+        setForm({ id: active.id, displayName: active.displayName || active.id, baseUrl: active.baseUrl, apiKey: '', models: active.models || [], defaultModel: active.defaultModel || '', defaultImageModel: active.defaultImageModel || '' })
         setHasApiKey(!!active.hasApiKey)
         setMode('edit')
         setPresetKey('')
@@ -158,7 +160,7 @@ function ProvidersPanel() {
   const selectProvider = (id) => {
     const p = providers.find(x => x.id === id)
     if (!p) return
-    setForm({ id: p.id, displayName: p.displayName || p.id, baseUrl: p.baseUrl, apiKey: '', models: p.models || [], defaultModel: p.defaultModel || '' })
+    setForm({ id: p.id, displayName: p.displayName || p.id, baseUrl: p.baseUrl, apiKey: '', models: p.models || [], defaultModel: p.defaultModel || '', defaultImageModel: p.defaultImageModel || '' })
     setHasApiKey(!!p.hasApiKey)
     setMode('edit')
     setPresetKey('')
@@ -166,7 +168,7 @@ function ProvidersPanel() {
   }
 
   const handleAddNew = () => {
-    setForm({ id: '', displayName: '', baseUrl: DEFAULT_LOCAL_BASE_URL, apiKey: '', models: [], defaultModel: '' })
+    setForm({ id: '', displayName: '', baseUrl: DEFAULT_LOCAL_BASE_URL, apiKey: '', models: [], defaultModel: '', defaultImageModel: '' })
     setHasApiKey(false)
     setMode('create')
     setPresetKey('custom')
@@ -207,11 +209,11 @@ function ProvidersPanel() {
     setBusy(true); setErr(''); setMsg('')
     try {
       if (mode === 'create') {
-        const payload = { id: form.id.trim().toLowerCase(), displayName: form.displayName || null, baseUrl: form.baseUrl.trim(), protocol: 'openai-completions', models: form.models, defaultModel: form.defaultModel.trim(), apiKey: form.apiKey || null }
+        const payload = { id: form.id.trim().toLowerCase(), displayName: form.displayName || null, baseUrl: form.baseUrl.trim(), protocol: 'openai-completions', models: form.models, defaultModel: form.defaultModel.trim(), defaultImageModel: form.defaultImageModel.trim(), apiKey: form.apiKey || null }
         await invokeDesktop('create_provider', { payload })
         setMsg('Đã tạo provider')
       } else {
-        const payload = { displayName: form.displayName || null, baseUrl: form.baseUrl.trim(), protocol: 'openai-completions', models: form.models, defaultModel: form.defaultModel.trim(), apiKey: form.apiKey || null }
+        const payload = { displayName: form.displayName || null, baseUrl: form.baseUrl.trim(), protocol: 'openai-completions', models: form.models, defaultModel: form.defaultModel.trim(), defaultImageModel: form.defaultImageModel.trim(), apiKey: form.apiKey || null }
         await invokeDesktop('update_provider', { id: form.id, payload })
         setMsg('Đã cập nhật provider')
       }
@@ -315,6 +317,13 @@ function ProvidersPanel() {
             <SuggestInput ariaLabel="Model mặc định để viết" placeholder="Để trống để dùng model đầu tiên trong danh sách" value={form.defaultModel} onChange={v=>setForm(f=>({...f, defaultModel:v}))} options={distinctSortedLabels([...(form.models||[]), ...(form.defaultModel.trim() ? [form.defaultModel] : [])])}/>
           </div>
           <div style={{fontSize:12, color:'#777', marginTop:4}}>Model này được dùng khi AI Content hoặc lịch AI không chọn model riêng.</div>
+        </div>
+        <div>
+          <label style={{fontSize:13, fontWeight:700}}>Model mặc định để tạo ảnh</label>
+          <div style={{marginTop:6}}>
+            <SuggestInput ariaLabel="Model mặc định để tạo ảnh" placeholder="Để trống để dùng model mặc định của provider" value={form.defaultImageModel} onChange={v=>setForm(f=>({...f, defaultImageModel:v}))} options={distinctSortedLabels([...(form.models||[]), ...(form.defaultImageModel.trim() ? [form.defaultImageModel] : [])])}/>
+          </div>
+          <div style={{fontSize:12, color:'#777', marginTop:4}}>Model này chỉ dùng cho AI tạo ảnh trong màn hình AI Content.</div>
         </div>
       </div>
       <div style={{display:'flex', justifyContent:'flex-end', gap:8, marginTop:6}}>
@@ -477,6 +486,18 @@ function AiContentPage() {
   const [topicModalOpen, setTopicModalOpen] = useState(false)
   const [promptUsed, setPromptUsed] = useState('')
   const [styleWarn, setStyleWarn] = useState('')
+  const [imageStyles, setImageStyles] = useState([])
+  const [selectedImageStyleId, setSelectedImageStyleId] = useState('')
+  const [imageStyleDraft, setImageStyleDraft] = useState({ id: '', name: '', content: '', builtin: false })
+  const [creatingImageStyle, setCreatingImageStyle] = useState(false)
+  const [imageStyleBusy, setImageStyleBusy] = useState(false)
+  const [imageStyleModalOpen, setImageStyleModalOpen] = useState(false)
+  const [autoImage, setAutoImage] = useState(false)
+  const [imageConfig, setImageConfig] = useState({ providerId: '', model: '', saveDir: '', styleId: '', size: '1024x1024' })
+  const [imageProviders, setImageProviders] = useState([])
+  const [imageBusy, setImageBusy] = useState(false)
+  const [imageErr, setImageErr] = useState('')
+  const [imageResult, setImageResult] = useState(null)
 
   const loadMediaOptions = async () => {
     if (!desktop) return
@@ -506,6 +527,38 @@ function AiContentPage() {
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadStyles() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadImageSetup = async () => {
+    if (!desktop) return
+    try {
+      const [list, cfg, provs] = await Promise.all([
+        invokeDesktop('list_image_styles'),
+        invokeDesktop('get_image_config').catch(() => null),
+        invokeDesktop('list_providers').catch(() => []),
+      ])
+      const styles = Array.isArray(list) ? list : []
+      const config = cfg || {}
+      const provsList = Array.isArray(provs) ? provs : []
+      setImageStyles(styles)
+      setImageProviders(provsList)
+      setImageConfig({
+        providerId: config.providerId || '',
+        model: config.model || '',
+        saveDir: config.saveDir || '',
+        styleId: config.styleId || '',
+        size: config.size || '1024x1024',
+      })
+      const preferred = (config.styleId && styles.some(s => s.id === config.styleId))
+        ? config.styleId
+        : (styles.find(s => s.id === DEFAULT_IMAGE_STYLE_ID)?.id || styles[0]?.id || '')
+      setSelectedImageStyleId(preferred)
+      const draft = styles.find(s => s.id === preferred)
+      if (draft) setImageStyleDraft({ id: draft.id, name: draft.name, content: draft.content, builtin: !!draft.builtin })
+    } catch (e) { setErr(String(e)) }
+  }
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadImageSetup() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadTopics = async () => {
     if (!desktop) return
@@ -572,6 +625,18 @@ function AiContentPage() {
   const effectiveDefaultModel = providerDefault || providerModels.map(m => String(m || '').trim()).find(Boolean) || ''
   const modelOptions = distinctSortedLabels([...providerModels, ...(providerDefault ? [providerDefault] : [])])
   const modelPlaceholder = effectiveDefaultModel ? `Mặc định: ${effectiveDefaultModel}` : 'Mặc định của provider'
+  const selectedImageStyle = imageStyles.find(s => s.id === selectedImageStyleId) || null
+  const imageStylePreview = ((selectedImageStyle && selectedImageStyle.content) || '').replace(/\s+/g, ' ').trim()
+  const activeImageProviderId = imageConfig.providerId || (activeProvider && activeProvider.id) || ''
+  const imageProvider = imageProviders.find(p => p.id === activeImageProviderId) || null
+  const imageModelOptions = distinctSortedLabels([
+    ...((imageProvider && imageProvider.models) || []),
+    (imageProvider && imageProvider.defaultImageModel) || '',
+    imageConfig.model,
+  ].filter(Boolean))
+  const imageModelPlaceholder = (imageProvider && imageProvider.defaultImageModel)
+    ? `Mặc định: ${imageProvider.defaultImageModel}`
+    : 'Mặc định của provider'
 
   const startCreateStyle = () => {
     setCreatingStyle(true)
@@ -726,6 +791,14 @@ function AiContentPage() {
       setBody(res.body || '')
       setPromptUsed(res.promptUsed || res.prompt || '')
       setMsg('Đã tạo nội dung')
+      setBusy(false)
+      if (autoImage) {
+        if (imageResult && imageResult.mediaId) {
+          setMediaIds(prev => prev.filter(x => x !== imageResult.mediaId))
+        }
+        setImageResult(null)
+        await generateImageFor(res.title || '', res.body || '')
+      }
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
 
@@ -737,10 +810,148 @@ function AiContentPage() {
       await invokeDesktop('save_content', { payload: { title, body, prompt, style: styleDraft.name.trim(), customStyle: null, mediaIds, topic: (topics.find(t => t.id === selectedTopicId)?.name) || null } })
       setMsg('Đã lưu vào Kho nội dung')
       setPrompt(''); setTitle(''); setBody(''); setMediaIds([]); setFreePrompt(''); setSelectedTopicId(''); setPromptUsed('')
+      setImageResult(null); setImageErr('')
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
 
   const toggleMedia = (id) => setMediaIds(prev => prev.includes(id) ? prev.filter(x => x!==id) : [...prev, id])
+
+  const persistImageConfig = async (patch) => {
+    const next = { ...imageConfig, ...patch }
+    setImageConfig(next)
+    if (!desktop) return
+    try { await invokeDesktop('set_image_config', { config: next }) } catch (e) { setImageErr(String(e)) }
+  }
+
+  const handleSelectImageStyle = (id) => {
+    const s = imageStyles.find(x => x.id === id)
+    if (!s) return
+    setSelectedImageStyleId(id)
+    setImageStyleDraft({ id: s.id, name: s.name, content: s.content, builtin: !!s.builtin })
+    setCreatingImageStyle(false)
+    setImageErr('')
+    persistImageConfig({ styleId: id })
+  }
+
+  const applyImageStyleResult = (res) => {
+    setSelectedImageStyleId(res.id)
+    setImageStyleDraft({ id: res.id, name: res.name, content: res.content, builtin: !!res.builtin })
+    setCreatingImageStyle(false)
+    persistImageConfig({ styleId: res.id })
+  }
+
+  const openCreateImageStyleModal = () => {
+    setCreatingImageStyle(true)
+    setImageStyleDraft({ id: '', name: '', content: '', builtin: false })
+    setImageErr('')
+    setImageStyleModalOpen(true)
+  }
+
+  const openEditImageStyleModal = () => {
+    if (!selectedImageStyle) return
+    setCreatingImageStyle(false)
+    setImageStyleDraft({ id: selectedImageStyle.id, name: selectedImageStyle.name, content: selectedImageStyle.content, builtin: !!selectedImageStyle.builtin })
+    setImageErr('')
+    setImageStyleModalOpen(true)
+  }
+
+  const closeImageStyleModal = () => {
+    if (creatingImageStyle) {
+      setImageStyleDraft({ id: '', name: '', content: '', builtin: false })
+    } else {
+      const s = imageStyles.find(x => x.id === selectedImageStyleId)
+      if (s) setImageStyleDraft({ id: s.id, name: s.name, content: s.content, builtin: !!s.builtin })
+    }
+    setImageStyleModalOpen(false)
+  }
+
+  const saveImageStyle = async () => {
+    setImageStyleBusy(true); setImageErr('')
+    try {
+      const res = creatingImageStyle
+        ? await invokeDesktop('create_image_style', { payload: { name: imageStyleDraft.name, content: imageStyleDraft.content } })
+        : await invokeDesktop('update_image_style', { payload: { id: imageStyleDraft.id, name: imageStyleDraft.name, content: imageStyleDraft.content } })
+      const list = await invokeDesktop('list_image_styles')
+      setImageStyles(list)
+      applyImageStyleResult(res)
+      setMsg(creatingImageStyle ? 'Đã thêm style ảnh mới' : 'Đã cập nhật style ảnh')
+      setImageStyleModalOpen(false)
+    } catch (e) { setImageErr(String(e)) } finally { setImageStyleBusy(false) }
+  }
+
+  const duplicateImageStyle = async () => {
+    setImageStyleBusy(true); setImageErr('')
+    try {
+      const res = await invokeDesktop('duplicate_image_style', { id: imageStyleDraft.id })
+      const list = await invokeDesktop('list_image_styles')
+      setImageStyles(list)
+      applyImageStyleResult(res)
+      setMsg('Đã nhân bản style ảnh')
+    } catch (e) { setImageErr(String(e)) } finally { setImageStyleBusy(false) }
+  }
+
+  const deleteImageStyle = async () => {
+    if (!window.confirm(`Xóa style ảnh "${imageStyleDraft.name}"?`)) return
+    setImageStyleBusy(true); setImageErr('')
+    try {
+      await invokeDesktop('delete_image_style', { id: imageStyleDraft.id })
+      const list = await invokeDesktop('list_image_styles')
+      setImageStyles(list)
+      const next = list.find(s => s.id === DEFAULT_IMAGE_STYLE_ID) || list[0]
+      if (next) {
+        setSelectedImageStyleId(next.id)
+        setImageStyleDraft({ id: next.id, name: next.name, content: next.content, builtin: !!next.builtin })
+        persistImageConfig({ styleId: next.id })
+      }
+      setMsg('Đã xóa style ảnh')
+      setImageStyleModalOpen(false)
+    } catch (e) { setImageErr(String(e)) } finally { setImageStyleBusy(false) }
+  }
+
+  const resetImageStyle = async () => {
+    setImageStyleBusy(true); setImageErr('')
+    try {
+      const res = await invokeDesktop('reset_image_style', { id: imageStyleDraft.id })
+      const list = await invokeDesktop('list_image_styles')
+      setImageStyles(list)
+      applyImageStyleResult(res)
+      setMsg('Đã khôi phục style ảnh mặc định')
+    } catch (e) { setImageErr(String(e)) } finally { setImageStyleBusy(false) }
+  }
+
+  const chooseImageFolder = async () => {
+    if (!desktop) return
+    try {
+      const dir = await invokeDesktop('pick_image_folder')
+      if (dir) await persistImageConfig({ saveDir: dir })
+    } catch (e) { setImageErr(String(e)) }
+  }
+
+  const generateImageFor = async (titleText, bodyText) => {
+    if (!desktop) return
+    const t = String(titleText ?? title ?? '').trim()
+    const b = String(bodyText ?? body ?? '').trim()
+    if (!t && !b) { setImageErr('Chưa có nội dung bài viết để tạo ảnh.'); return }
+    setImageBusy(true); setImageErr('')
+    try {
+      const payload = { title: t, body: b }
+      if (selectedImageStyleId) payload.styleId = selectedImageStyleId
+      if (imageConfig.providerId) payload.providerId = imageConfig.providerId
+      if (imageConfig.model.trim()) payload.model = imageConfig.model.trim()
+      if (imageConfig.size) payload.size = imageConfig.size
+      if (imageConfig.saveDir) payload.saveDir = imageConfig.saveDir
+      const res = await invokeDesktop('generate_image', { payload })
+      let url = ''
+      try { url = await localAssetUrl(res.path) } catch { url = '' }
+      setImageResult({ ...res, url })
+      setMediaIds(prev => {
+        const oldId = imageResult && imageResult.mediaId
+        const withoutOld = oldId ? prev.filter(x => x !== oldId) : prev
+        return withoutOld.includes(res.mediaId) ? withoutOld : [...withoutOld, res.mediaId]
+      })
+      setMsg('Đã tạo ảnh minh hoạ')
+    } catch (e) { setImageErr(String(e)) } finally { setImageBusy(false) }
+  }
 
   return <section className="media-page">
     <div className="page-heading"><div><p>AI CONTENT</p><h1>Tạo nội dung với AI</h1><span>Nhập prompt, chọn style, tạo nội dung với AI provider đã cấu hình.</span></div></div>
@@ -818,6 +1029,67 @@ function AiContentPage() {
         <textarea spellCheck={false} placeholder="Nội dung sẽ hiện sau khi Tạo — bạn có thể chỉnh sửa..." value={body} onChange={e=>setBody(e.target.value)} disabled={busy} style={{width:'100%', minHeight:160, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical'}}/>
         <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{charCount(body)} ký tự</div>
       </div>
+      <div style={{border:'1px solid #e8e8ed', borderRadius:10, padding:12, display:'flex', flexDirection:'column', gap:12, background:'#fafaff'}}>
+        <label style={{display:'flex', alignItems:'center', gap:8, fontSize:14, fontWeight:700, cursor:'pointer'}}>
+          <input type="checkbox" checked={autoImage} onChange={e=>setAutoImage(e.target.checked)} disabled={!desktop || busy} />
+          Tạo ảnh minh hoạ bằng AI
+        </label>
+        <div style={{fontSize:12, color:'#777'}}>Ảnh được tạo sau khi có nội dung, dựa trên nội dung bài viết và style ảnh bên dưới. Mỗi lần tạo 1 ảnh.</div>
+        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 180px', gap:12}}>
+          <div>
+            <label style={{fontSize:13, fontWeight:700}}>Style ảnh</label>
+            <div style={{display:'flex', gap:6, marginTop:6}}>
+              <select value={selectedImageStyleId} onChange={e=>handleSelectImageStyle(e.target.value)} disabled={!desktop || imageBusy || imageStyleBusy} style={{flex:1, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px'}}>
+                {imageStyles.length ? imageStyles.map(s => <option key={s.id} value={s.id}>{s.name}</option>) : <option value="">Mở app desktop để tải style ảnh</option>}
+              </select>
+              <button className="outline" onClick={openEditImageStyleModal} disabled={!desktop || imageBusy || imageStyleBusy || !selectedImageStyleId} style={{height:36}}><Pencil size={14}/> Sửa</button>
+              <button className="outline" onClick={openCreateImageStyleModal} disabled={!desktop || imageBusy || imageStyleBusy} style={{height:36}}><Plus size={14}/> Thêm</button>
+            </div>
+            <div style={{fontSize:12, color:'#999', marginTop:4, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}>{imageStylePreview || 'Chưa có nội dung style ảnh'}</div>
+          </div>
+          <div>
+            <label style={{fontSize:13, fontWeight:700}}>Provider tạo ảnh</label>
+            <select value={imageConfig.providerId} onChange={e=>persistImageConfig({ providerId: e.target.value })} disabled={!desktop || imageBusy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:6}}>
+              <option value="">Provider đang dùng{activeProvider ? ` (${activeProvider.displayName || activeProvider.id})` : ''}</option>
+              {imageProviders.map(p => <option key={p.id} value={p.id}>{p.displayName || p.id}</option>)}
+            </select>
+            <div style={{fontSize:13, fontWeight:700, marginTop:8}}>Model tạo ảnh</div>
+            <div style={{marginTop:6}}>
+              <SuggestInput ariaLabel="Model tạo ảnh" placeholder={imageModelPlaceholder} value={imageConfig.model} onChange={v=>setImageConfig(c=>({...c, model:v}))} options={imageModelOptions}/>
+            </div>
+          </div>
+          <div>
+            <label style={{fontSize:13, fontWeight:700}}>Kích thước</label>
+            <select value={imageConfig.size} onChange={e=>persistImageConfig({ size: e.target.value })} disabled={!desktop || imageBusy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:6}}>
+              {IMAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label style={{fontSize:13, fontWeight:700}}>Thư mục lưu ảnh</label>
+          <div style={{display:'flex', gap:8, marginTop:6, flexWrap:'wrap'}}>
+            <input readOnly value={imageConfig.saveDir} placeholder="Mặc định: chỉ lưu trong thư viện media của ứng dụng" style={{flex:'1 1 280px', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', fontSize:13, background:'#f9fafb'}}/>
+            <button className="outline" onClick={chooseImageFolder} disabled={!desktop || imageBusy} style={{height:36}}>Chọn thư mục</button>
+            <button className="outline" onClick={()=>persistImageConfig({ saveDir: '' })} disabled={!desktop || imageBusy || !imageConfig.saveDir} style={{height:36}}>Bỏ chọn</button>
+          </div>
+          <div style={{fontSize:12, color:'#999', marginTop:4}}>Ảnh luôn được lưu vào thư viện media để xem trước và đăng bài; thư mục bạn chọn nhận thêm một bản sao.</div>
+        </div>
+        <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+          <button className="primary" onClick={()=>generateImageFor(title, body)} disabled={!desktop || imageBusy || busy || (!title.trim() && !body.trim())} style={{height:36}}><Sparkles size={16}/> {imageBusy ? 'Đang tạo ảnh...' : (imageErr ? 'Thử tạo lại ảnh' : 'Tạo ảnh')}</button>
+          <span style={{fontSize:12, color:'#999'}}>Cần có Tiêu đề hoặc Nội dung. Ảnh tối đa 10MB, định dạng PNG/JPEG/WEBP/GIF.</span>
+        </div>
+        {imageErr && <div className="error-box">{imageErr}</div>}
+        {imageResult && <div style={{display:'flex', gap:12, alignItems:'center', border:'1px solid #e8e8ed', borderRadius:10, padding:10, background:'#fff'}}>
+          {imageResult.url ? <img src={imageResult.url} alt={imageResult.name} style={{width:96, height:96, objectFit:'cover', borderRadius:8, border:'1px solid #eee'}}/> : <div style={{width:96, height:96, borderRadius:8, background:'#f1f0f6', display:'grid', placeItems:'center', fontSize:12, color:'#777'}}>Đã tạo</div>}
+          <div style={{display:'flex', flexDirection:'column', gap:2, minWidth:0}}>
+            <strong style={{fontSize:13}}>Đã gắn vào bài viết</strong>
+            <span style={{fontSize:12, color:'#555', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{imageResult.name}</span>
+            <span style={{fontSize:12, color:'#777'}}>Model: {imageResult.model}</span>
+            {imageResult.savedCopyPath && <span style={{fontSize:12, color:'#2e6b2e'}}>Bản sao: {imageResult.savedCopyPath}</span>}
+            {imageResult.copyWarning && <span style={{fontSize:12, color:'#b55041'}}>{imageResult.copyWarning}</span>}
+          </div>
+        </div>}
+      </div>
       <div>
         <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
           <label style={{fontSize:14, fontWeight:700}}>Gắn media ({mediaIds.length})</label>
@@ -827,7 +1099,7 @@ function AiContentPage() {
         {mediaIds.length>0 && <div style={{fontSize:13, color:'#6558d6', marginTop:6}}>Đã chọn {mediaIds.length} media</div>}
       </div>
       <div style={{display:'flex', gap:8, justifyContent:'flex-end'}}>
-        <button className="outline" onClick={()=>{setPrompt(''); setTitle(''); setBody(''); setMediaIds([]); setFreePrompt(''); setSelectedTopicId(''); setPromptUsed(''); setMsg(''); setErr(''); setStyleWarn('')}} disabled={busy} style={{height:36}}>Xóa form</button>
+        <button className="outline" onClick={()=>{setPrompt(''); setTitle(''); setBody(''); setMediaIds([]); setFreePrompt(''); setSelectedTopicId(''); setPromptUsed(''); setMsg(''); setErr(''); setStyleWarn(''); setImageResult(null); setImageErr(''); setAutoImage(false)}} disabled={busy} style={{height:36}}>Xóa form</button>
         <button className="primary" onClick={save} disabled={!desktop || busy} style={{height:36}}><FileText size={16}/> Lưu vào kho</button>
       </div>
     </div>
@@ -859,6 +1131,36 @@ function AiContentPage() {
             <button className="outline" onClick={resetStyle} disabled={!styleDraft.builtin || styleBusy} style={{height:32}}>Khôi phục mặc định</button>
             <button className="outline" onClick={deleteStyle} disabled={styleDraft.builtin || !styleDraft.id || styleBusy} style={{height:32, color:'#b55041'}}>Xóa</button>
             <button className="outline" onClick={closeStyleModal} style={{height:32}}>Đóng</button>
+          </div>
+        </div>
+      </div>
+    )}
+    {imageStyleModalOpen && (
+      <div onClick={e=>{ if (e.target === e.currentTarget) closeImageStyleModal() }} style={{position:'fixed', inset:0, background:'#0006', display:'grid', placeItems:'center', zIndex:50}}>
+        <div role="dialog" aria-modal="true" aria-label={creatingImageStyle ? 'Thêm style ảnh mới' : 'Sửa style ảnh'} tabIndex={-1} className="panel" onKeyDown={e=>{ if (e.key === 'Escape') closeImageStyleModal() }} style={{width:'min(560px, 92vw)', maxHeight:'86vh', overflow:'auto', background:'#fff', borderRadius:12, padding:16, display:'grid', gap:10}}>
+          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:8}}>
+            <label style={{fontSize:14, fontWeight:700}}>{creatingImageStyle ? 'Thêm style ảnh mới' : 'Sửa style ảnh'}</label>
+            <div style={{display:'flex', alignItems:'center', gap:8}}>
+              {!creatingImageStyle && <span style={{fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:999, background: imageStyleDraft.builtin ? '#efeeff' : '#eef7ee', color: imageStyleDraft.builtin ? '#6558d6' : '#2e6b2e'}}>{imageStyleDraft.builtin ? 'Mặc định' : 'Tùy chỉnh'}</span>}
+              <button className="outline" onClick={closeImageStyleModal} style={{height:32}}>Đóng</button>
+            </div>
+          </div>
+          <div>
+            <label style={{fontSize:13, fontWeight:600}}>Tên style ảnh</label>
+            <input spellCheck={false} autoFocus value={imageStyleDraft.name} onChange={e=>setImageStyleDraft(d=>({...d, name:e.target.value}))} maxLength={60} disabled={busy || imageStyleBusy} placeholder="VD: Điện ảnh ấm áp" style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
+          </div>
+          <div>
+            <label style={{fontSize:13, fontWeight:600}}>Nội dung style ảnh</label>
+            <textarea spellCheck={false} value={imageStyleDraft.content} onChange={e=>setImageStyleDraft(d=>({...d, content:e.target.value}))} rows={10} disabled={busy || imageStyleBusy} placeholder="Mô tả phong cách ảnh: ánh sáng, bố cục, màu sắc, chất liệu, tâm trạng... Không có chữ trong ảnh." style={{width:'100%', minHeight:140, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical', fontFamily:'inherit'}}/>
+            <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{charCount(imageStyleDraft.content)} ký tự</div>
+          </div>
+          {imageErr && <div className="error-box">{imageErr}</div>}
+          <div style={{display:'flex', gap:8, flexWrap:'wrap', justifyContent:'flex-end'}}>
+            <button className="primary" onClick={saveImageStyle} disabled={busy || imageStyleBusy} style={{height:32}}><FileText size={14}/> Lưu thay đổi</button>
+            <button className="outline" onClick={duplicateImageStyle} disabled={creatingImageStyle || !imageStyleDraft.id || imageStyleBusy} style={{height:32}}>Nhân bản</button>
+            <button className="outline" onClick={resetImageStyle} disabled={!imageStyleDraft.builtin || imageStyleBusy} style={{height:32}}>Khôi phục mặc định</button>
+            <button className="outline" onClick={deleteImageStyle} disabled={imageStyleDraft.builtin || !imageStyleDraft.id || imageStyleBusy} style={{height:32, color:'#b55041'}}>Xóa</button>
+            <button className="outline" onClick={closeImageStyleModal} style={{height:32}}>Đóng</button>
           </div>
         </div>
       </div>

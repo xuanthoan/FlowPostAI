@@ -19,6 +19,7 @@ window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
           baseUrl: baseUrl,
           protocol: 'openai-completions',
           models: ['xoay-vong-worker-web-128k'],
+          defaultImageModel: 'img-model',
           hasApiKey: true,
         },
       ];
@@ -29,6 +30,7 @@ window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
         baseUrl: baseUrl,
         protocol: 'openai-completions',
         models: ['xoay-vong-worker-web-128k'],
+        defaultImageModel: 'img-model',
         hasApiKey: true,
       };
     case 'update_provider': {
@@ -43,6 +45,7 @@ window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
         baseUrl: baseUrl,
         protocol: protocol || 'openai-completions',
         models: ['xoay-vong-worker-web-128k'],
+        defaultImageModel: 'img-model',
         hasApiKey: true,
       };
     }
@@ -63,6 +66,7 @@ window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
         baseUrl: baseUrl,
         protocol: 'openai-completions',
         models: ['xoay-vong-worker-web-128k'],
+        defaultImageModel: 'img-model',
         hasApiKey: true,
       };
     case 'delete_provider':
