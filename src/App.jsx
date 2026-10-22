@@ -498,6 +498,8 @@ function AiContentPage() {
   const [imageBusy, setImageBusy] = useState(false)
   const [imageErr, setImageErr] = useState('')
   const [imageResult, setImageResult] = useState(null)
+  const imageModelSaveTimer = useRef(null)
+  const imageConfigRef = useRef(imageConfig)
 
   const loadMediaOptions = async () => {
     if (!desktop) return
@@ -559,6 +561,9 @@ function AiContentPage() {
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadImageSetup() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { imageConfigRef.current = imageConfig }, [imageConfig])
+  useEffect(() => () => { if (imageModelSaveTimer.current) clearTimeout(imageModelSaveTimer.current) }, [])
 
   const loadTopics = async () => {
     if (!desktop) return
@@ -823,6 +828,17 @@ function AiContentPage() {
     try { await invokeDesktop('set_image_config', { config: next }) } catch (e) { setImageErr(String(e)) }
   }
 
+  const handleImageModelChange = (v) => {
+    setImageConfig(c => ({ ...c, model: v }))
+    if (!desktop) return
+    if (imageModelSaveTimer.current) clearTimeout(imageModelSaveTimer.current)
+    imageModelSaveTimer.current = setTimeout(() => {
+      const cfg = imageConfigRef.current
+      invokeDesktop('set_image_config', { config: { ...cfg, model: (cfg.model || '').trim() } })
+        .catch(e => setImageErr(String(e)))
+    }, 600)
+  }
+
   const handleSelectImageStyle = (id) => {
     const s = imageStyles.find(x => x.id === id)
     if (!s) return
@@ -1055,7 +1071,7 @@ function AiContentPage() {
             </select>
             <div style={{fontSize:13, fontWeight:700, marginTop:8}}>Model tạo ảnh</div>
             <div style={{marginTop:6}}>
-              <SuggestInput ariaLabel="Model tạo ảnh" placeholder={imageModelPlaceholder} value={imageConfig.model} onChange={v=>setImageConfig(c=>({...c, model:v}))} options={imageModelOptions}/>
+              <SuggestInput ariaLabel="Model tạo ảnh" placeholder={imageModelPlaceholder} value={imageConfig.model} onChange={handleImageModelChange} options={imageModelOptions}/>
             </div>
           </div>
           <div>

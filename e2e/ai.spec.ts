@@ -162,6 +162,8 @@ test.describe('AI generate_content E2E (real server)', () => {
   test('AI Content generates an image when the checkbox is enabled', async ({ page }) => {
     await page.getByRole('button', { name: 'AI Content', exact: true }).click();
     await page.getByLabel('Tạo ảnh minh hoạ bằng AI').check();
+    await page.getByLabel('Model tạo ảnh', { exact: true }).fill('img-2');
+    await expect.poll(async () => page.evaluate(() => (window as any).__LAST_IMAGE_CONFIG__?.model)).toBe('img-2');
     await page.getByPlaceholder('VD: Bí quyết năng lượng buổi sáng cho dân văn phòng...').fill('Bí quyết năng lượng buổi sáng');
     await page.getByRole('button', { name: 'Tạo nội dung', exact: true }).click();
     await expect(page.getByText('Đã tạo ảnh minh hoạ')).toBeVisible();
@@ -170,6 +172,7 @@ test.describe('AI generate_content E2E (real server)', () => {
     expect(imgPayload.title).toBeTruthy();
     expect(imgPayload.body).toBeTruthy();
     expect(imgPayload.styleId).toBe('cinematic');
+    expect(imgPayload.model).toBe('img-2');
     await expect(page.getByText('Đã gắn vào bài viết')).toBeVisible();
     await expect(page.getByText('Gắn media (1)')).toBeVisible();
   });
