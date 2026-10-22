@@ -2,6 +2,27 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-22 — AI Content: tạo ảnh minh hoạ bằng AI
+
+### Added
+- `src-tauri/src/image_styles.rs` — thực thể style ảnh riêng (`image_styles.json`) với 3 style mặc định `Điện ảnh`, `Tối giản`, `Minh hoạ phẳng`; 6 lệnh list/create/update/duplicate/delete/reset; chặn xoá và chặn khôi phục style mặc định.
+- `src-tauri/src/image_gen.rs` — `generate_image` gọi `POST {base}/images/generations` theo chuẩn OpenAI-compatible (`n=1`, `response_format=b64_json`, timeout 180s); nếu provider trả `url`, backend tự tải ảnh về và không gửi kèm API key; nhận diện PNG/JPEG/WEBP/GIF và từ chối ảnh quá 10MB; `image-config.json` lưu provider/model/thư mục/style/kích thước; `pick_image_folder` chọn thư mục lưu.
+- `src-tauri/src/providers.rs` — provider có thêm `defaultImageModel` (serde mặc định nên `providers.json` cũ vẫn đọc được); `resolve_image_model` theo thứ tự: model truyền kèm → `defaultImageModel` → `defaultModel` → model đầu tiên trong danh sách → `DEFAULT_MODEL`.
+- `src/App.jsx` — `AI Content` có checkbox `Tạo ảnh minh hoạ bằng AI` (mặc định tắt), khối chọn Style ảnh/Provider/Model/Kích thước/Thư mục lưu, nút `Tạo ảnh` và `Thử tạo lại ảnh`; ảnh tạo xong được gắn vào nội dung để đăng kèm. `Providers` có ô `Model mặc định để tạo ảnh`.
+
+### Changed
+- `src-tauri/src/lib.rs` — thêm `register_bytes_at` / `register_media_bytes` để ghi ảnh AI vào thư viện media kèm `media-index.json`, có rollback khi ghi index lỗi.
+- `src/App.jsx` — ảnh AI luôn được lưu trong thư viện media; nếu người dùng chọn thư mục, ghi thêm một bản sao (lỗi copy chỉ là cảnh báo). Lỗi tạo ảnh không làm mất nội dung đã tạo.
+
+### Verified
+- `cargo test --lib` — 327 passed / 0 failed.
+- `npm exec -- eslint .` — exit 0 (QA chạy lại độc lập).
+- `npm run build` — exit 0.
+- `E2E_MOCK=true npm exec -- playwright test e2e/ai.spec.ts e2e/providers.spec.ts` — 13 passed / 0 failed (gồm 2 test mới: tạo ảnh khi tick checkbox, và giữ nguyên nội dung khi tạo ảnh lỗi).
+
+### Notes
+- Chưa kiểm thử với provider tạo ảnh thật; E2E dùng mock.
+
 ## [Unreleased] - 2026-10-20 — Kho nội dung: preview ảnh và video đính kèm trong list
 
 ### Changed
