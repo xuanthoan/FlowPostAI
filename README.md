@@ -77,7 +77,7 @@ FlowPost AI dùng token do bạn tự tạo và dán vào ứng dụng. Token c�
 
 - Trong `AI Content`, tick `Tạo ảnh minh hoạ bằng AI` (mặc định tắt). Sau khi AI trả về bài viết, ứng dụng gọi model tạo ảnh để sinh **1 ảnh** dựa trên tiêu đề + nội dung bài viết và `Style ảnh` đang chọn.
 - `Style ảnh` là danh sách riêng (`image_styles.json`), có 3 style mặc định (`Điện ảnh`, `Tối giản`, `Minh hoạ phẳng`) và cho phép thêm/sửa/nhân bản/xóa/khôi phục mặc định. Style ảnh chỉ chứa mô tả phong cách, không phải nội dung bài viết.
-- Chọn model tạo ảnh riêng: `Cài đặt` → `Providers` → `Model mặc định để tạo ảnh`, hoặc chọn `Provider tạo ảnh` + `Model tạo ảnh` + `Kích thước` ngay trong khối tạo ảnh ở `AI Content`. Model viết bài vẫn dùng mục `Model` riêng.
+- Chọn provider/model tạo ảnh: `Cài đặt` → tab `Model AI` → mục `Model tạo ảnh` (provider, model, kích thước, thư mục lưu). Chọn provider/model viết content ở cùng tab, mục `Model viết content`; AI Content vẫn có thể đổi model cho từng bài.
 - Ứng dụng gọi `POST {base}/images/generations` theo chuẩn OpenAI-compatible với `n=1`, `response_format=b64_json`; nếu provider trả `url`, backend tự tải ảnh về (không gửi API key tới host tải ảnh).
 - Ảnh luôn được lưu vào thư viện media của ứng dụng (`media/`) và được gắn vào bài viết để xem trước/đăng kèm. Nếu bạn chọn `Thư mục lưu ảnh`, ứng dụng ghi thêm một bản sao vào thư mục đó; lỗi ghi bản sao chỉ là cảnh báo, ảnh trong thư viện vẫn dùng được.
 - Giới hạn: 1 ảnh mỗi lần tạo; ảnh phải là PNG/JPEG/WEBP/GIF và không quá 10MB; kích thước hỗ trợ `1024x1024`, `1024x1536`, `1536x1024`.

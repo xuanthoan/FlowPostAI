@@ -545,7 +545,7 @@ fn append_image_model_hint(base: String, model: &str, status: u16) -> String {
         return base;
     }
     format!(
-        "{base}{IMAGE_MODEL_HINT_PREFIX}model '{model}' là model tạo ảnh, không dùng được để viết — hãy chọn model văn bản ở mục Model trong AI Content hoặc \"Model mặc định để viết\" trong Providers."
+        "{base}{IMAGE_MODEL_HINT_PREFIX}model '{model}' là model tạo ảnh, không dùng được để viết — hãy chọn model văn bản ở mục Model trong AI Content hoặc \"Model viết content\" trong Cài đặt → tab Model AI."
     )
 }
 

@@ -121,7 +121,7 @@ function MediaLibrary() {
 }
 
 function ProvidersPanel({ desktop, providers, activeId, onChanged }) {
-  const [form, setForm] = useState({ id: '', displayName: '', baseUrl: DEFAULT_LOCAL_BASE_URL, apiKey: '', models: [], defaultModel: '', defaultImageModel: '' })
+  const [form, setForm] = useState({ id: '', displayName: '', baseUrl: DEFAULT_LOCAL_BASE_URL, apiKey: '', models: [] })
   const [presetKey, setPresetKey] = useState('')
   const [hasApiKey, setHasApiKey] = useState(false)
   const [modelInput, setModelInput] = useState('')
@@ -131,8 +131,8 @@ function ProvidersPanel({ desktop, providers, activeId, onChanged }) {
   const [mode, setMode] = useState('create')
   const skipAutoFill = useRef(false)
 
-  const emptyForm = () => ({ id: '', displayName: '', baseUrl: DEFAULT_LOCAL_BASE_URL, apiKey: '', models: [], defaultModel: '', defaultImageModel: '' })
-  const fillForm = (p) => ({ id: p.id, displayName: p.displayName || p.id, baseUrl: p.baseUrl, apiKey: '', models: p.models || [], defaultModel: p.defaultModel || '', defaultImageModel: p.defaultImageModel || '' })
+  const emptyForm = () => ({ id: '', displayName: '', baseUrl: DEFAULT_LOCAL_BASE_URL, apiKey: '', models: [] })
+  const fillForm = (p) => ({ id: p.id, displayName: p.displayName || p.id, baseUrl: p.baseUrl, apiKey: '', models: p.models || [] })
 
   // Follow the shared provider list without discarding unsaved edits for the provider being edited.
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -164,7 +164,7 @@ function ProvidersPanel({ desktop, providers, activeId, onChanged }) {
   }
 
   const handleAddNew = () => {
-    setForm({ id: '', displayName: '', baseUrl: DEFAULT_LOCAL_BASE_URL, apiKey: '', models: [], defaultModel: '', defaultImageModel: '' })
+    setForm({ id: '', displayName: '', baseUrl: DEFAULT_LOCAL_BASE_URL, apiKey: '', models: [] })
     setHasApiKey(false)
     setMode('create')
     setPresetKey('custom')
@@ -194,14 +194,14 @@ function ProvidersPanel({ desktop, providers, activeId, onChanged }) {
     setBusy(true); setErr(''); setMsg('')
     try {
       if (mode === 'create') {
-        const payload = { id: form.id.trim().toLowerCase(), displayName: form.displayName || null, baseUrl: form.baseUrl.trim(), protocol: 'openai-completions', models: form.models, defaultModel: form.defaultModel.trim(), defaultImageModel: form.defaultImageModel.trim(), apiKey: form.apiKey || null }
+        const payload = { id: form.id.trim().toLowerCase(), displayName: form.displayName || null, baseUrl: form.baseUrl.trim(), protocol: 'openai-completions', models: form.models, apiKey: form.apiKey || null }
         const res = await invokeDesktop('create_provider', { payload })
         setForm(f => ({ ...f, id: res.id, apiKey: '' }))
         setHasApiKey(!!res.hasApiKey)
         setMode('edit')
         setMsg('Đã tạo provider')
       } else {
-        const payload = { displayName: form.displayName || null, baseUrl: form.baseUrl.trim(), protocol: 'openai-completions', models: form.models, defaultModel: form.defaultModel.trim(), defaultImageModel: form.defaultImageModel.trim(), apiKey: form.apiKey || null }
+        const payload = { displayName: form.displayName || null, baseUrl: form.baseUrl.trim(), protocol: 'openai-completions', models: form.models, apiKey: form.apiKey || null }
         await invokeDesktop('update_provider', { id: form.id, payload })
         setForm(f => ({ ...f, apiKey: '' }))
         setMsg('Đã cập nhật provider')
@@ -298,20 +298,6 @@ function ProvidersPanel({ desktop, providers, activeId, onChanged }) {
             <button className="outline" onClick={addModel} disabled={busy || !modelInput.trim()} style={{height:32, fontSize:13}}>Add model</button>
           </div>
         </div>
-        <div>
-          <label style={{fontSize:13, fontWeight:700}}>Model mặc định để viết</label>
-          <div style={{marginTop:6}}>
-            <SuggestInput ariaLabel="Model mặc định để viết" placeholder="Để trống để dùng model đầu tiên trong danh sách" value={form.defaultModel} onChange={v=>setForm(f=>({...f, defaultModel:v}))} options={distinctSortedLabels([...(form.models||[]), ...(form.defaultModel.trim() ? [form.defaultModel] : [])])}/>
-          </div>
-          <div style={{fontSize:12, color:'#777', marginTop:4}}>Model này được dùng khi AI Content hoặc lịch AI không chọn model riêng.</div>
-        </div>
-        <div>
-          <label style={{fontSize:13, fontWeight:700}}>Model mặc định để tạo ảnh</label>
-          <div style={{marginTop:6}}>
-            <SuggestInput ariaLabel="Model mặc định để tạo ảnh" placeholder="Để trống để dùng model mặc định của provider" value={form.defaultImageModel} onChange={v=>setForm(f=>({...f, defaultImageModel:v}))} options={distinctSortedLabels([...(form.models||[]), ...(form.defaultImageModel.trim() ? [form.defaultImageModel] : [])])}/>
-          </div>
-          <div style={{fontSize:12, color:'#777', marginTop:4}}>Model này chỉ dùng cho AI tạo ảnh trong màn hình AI Content.</div>
-        </div>
       </div>
       <div style={{display:'flex', justifyContent:'flex-end', gap:8, marginTop:6}}>
         <button className="outline" onClick={()=>{ setErr(''); setMsg(''); const p = providers.find(x => x.id === form.id); if (p) { setForm(fillForm(p)); setHasApiKey(!!p.hasApiKey) } }} disabled={busy} style={{height:36}}>Cancel</button>
@@ -377,14 +363,23 @@ function useProviderSettings(desktop) {
     return next
   }
 
-  return { providers, activeId, imageConfig, setImageConfig, loading, error, imageConfigRef, loadAll, selectContentProvider, saveImageConfig }
+  const saveContentModel = async (model) => {
+    if (!desktop || !activeId) return
+    try {
+      await invokeDesktop('update_provider', { id: activeId, payload: { defaultModel: model || '' } })
+      await loadAll()
+      setError('')
+    } catch (e) { setError(String(e)) }
+  }
+
+  return { providers, activeId, imageConfig, setImageConfig, loading, error, imageConfigRef, loadAll, selectContentProvider, saveImageConfig, saveContentModel }
 }
 
 function SettingsPage() {
   const desktop = isDesktop()
   const {
-    providers, activeId, imageConfig, setImageConfig, loading,
-    error: providerErr, loadAll, selectContentProvider, saveImageConfig,
+    providers, activeId, imageConfig, loading,
+    error: providerErr, loadAll, selectContentProvider, saveImageConfig, saveContentModel,
   } = useProviderSettings(desktop)
   const [fbInput, setFbInput] = useState('')
   const [status, setStatus] = useState({ hasFacebookToken: false })
@@ -393,12 +388,10 @@ function SettingsPage() {
   const [err, setErr] = useState('')
   const [showPublish, setShowPublish] = useState(false)
   const [imageFolderErr, setImageFolderErr] = useState('')
+  const [subTab, setSubTab] = useState('ket-noi')
 
   const [pages, setPages] = useState([])
   const [selectedPageId, setSelectedPageId] = useState('')
-  const imageModelSaveTimer = useRef(null)
-  const pendingImageModelRef = useRef(null)
-  const imageModelDirtyRef = useRef(false)
 
   const activeProvider = providers.find(p => p.id === activeId) || null
   const imgProvider = providers.find(p => p.id === (imageConfig.providerId || activeId)) || null
@@ -417,34 +410,8 @@ function SettingsPage() {
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { refresh() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => () => { flushImageModel() }, [])
-
-  // Debounced so typing a model name does not hit disk on every keystroke.
-  // A pending edit is flushed on unmount so navigating away does not lose it.
-  function flushImageModel() {
-    if (imageModelSaveTimer.current) { clearTimeout(imageModelSaveTimer.current); imageModelSaveTimer.current = null }
-    if (!imageModelDirtyRef.current) return
-    imageModelDirtyRef.current = false
-    saveImageConfig({ model: pendingImageModelRef.current ?? '' })
-  }
-
-  const handleImageModelChange = (v) => {
-    setImageConfig(c => ({ ...c, model: v }))
-    pendingImageModelRef.current = v
-    imageModelDirtyRef.current = true
-    if (imageModelSaveTimer.current) clearTimeout(imageModelSaveTimer.current)
-    imageModelSaveTimer.current = setTimeout(() => {
-      imageModelSaveTimer.current = null
-      imageModelDirtyRef.current = false
-      saveImageConfig({ model: v })
-    }, 600)
-  }
 
   const handleImageProviderChange = async (value) => {
-    if (imageModelSaveTimer.current) { clearTimeout(imageModelSaveTimer.current); imageModelSaveTimer.current = null }
-    imageModelDirtyRef.current = false
-    pendingImageModelRef.current = null
     await saveImageConfig({ providerId: value, model: '' })
   }
 
@@ -492,57 +459,77 @@ function SettingsPage() {
     {!desktop && <div className="desktop-notice"><HardDrive size={23}/><div><strong>Hãy mở bằng ứng dụng FlowPost AI Desktop</strong><span>Chức năng bảo mật chỉ hoạt động trong bản Tauri.</span></div></div>}
     {providerErr && <div className="error-box">{providerErr}</div>}
 
-    <div>
-      <h2 style={{fontSize:16, margin:'0 0 10px'}}>1. Providers</h2>
+    <div style={{display:'flex', gap:8, marginBottom:14, flexWrap:'wrap', alignItems:'center'}}>
+      <button className={subTab==='ket-noi'?'primary':'outline'} onClick={()=>setSubTab('ket-noi')} style={{height:32}}>Kết nối</button>
+      <button className={subTab==='provider'?'primary':'outline'} onClick={()=>setSubTab('provider')} style={{height:32}}>Cài đặt Provider</button>
+      <button className={subTab==='model'?'primary':'outline'} onClick={()=>setSubTab('model')} style={{height:32}}>Model AI</button>
+    </div>
+
+    {subTab==='provider' && <div>
+      <h2 style={{fontSize:16, margin:'0 0 10px'}}>Cài đặt Provider</h2>
+      <p style={{fontSize:13, color:'#777', margin:'0 0 12px'}}>Quản lý provider, API key và danh sách model. Model dùng để viết/tạo ảnh chọn ở tab Model AI.</p>
       <ProvidersPanel desktop={desktop} providers={providers} activeId={activeId} onChanged={loadAll}/>
-    </div>
+    </div>}
 
-    <div className="panel" style={{padding:20, display:'flex', flexDirection:'column', gap:12}}>
-      <h2 style={{fontSize:16, margin:0}}>2. AI Content</h2>
-      <p style={{fontSize:13, color:'#777', margin:0}}>Provider dùng để viết bài. Model có thể đổi cho từng bài trong màn AI Content.</p>
-      <select aria-label="Provider nội dung" value={activeId} onChange={e=>selectContentProvider(e.target.value)} disabled={!desktop || loading} style={{maxWidth:460, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', fontSize:14}}>
-        {providers.length === 0 && <option value="">Chưa có provider — thêm ở mục 1</option>}
-        {providers.map(p => <option key={p.id} value={p.id}>{p.displayName || p.id}{p.hasApiKey ? '' : ' — chưa có key'}</option>)}
-      </select>
-      <div style={{fontSize:13, color:'#555'}}>Model mặc định: <b>{activeProvider?.defaultModel || activeProvider?.models?.[0] || '—'}</b></div>
-      {activeProvider && !activeProvider.hasApiKey && <div className="error-box">Provider này chưa có API key — hãy nhập ở mục 1.</div>}
-    </div>
-
-    <div className="panel" style={{padding:20, display:'flex', flexDirection:'column', gap:12}}>
-      <h2 style={{fontSize:16, margin:0}}>3. AI Image</h2>
-      <div>
-        <label style={{fontSize:13, fontWeight:700}}>Provider tạo ảnh</label>
-        <select aria-label="Provider tạo ảnh" value={imageConfig.providerId} onChange={e=>handleImageProviderChange(e.target.value)} disabled={!desktop || loading} style={{display:'block', width:'100%', maxWidth:460, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}>
-          <option value="">Theo provider AI content{activeProvider ? ` (${activeProvider.displayName || activeProvider.id})` : ''}</option>
-          {providers.map(p => <option key={p.id} value={p.id}>{p.displayName || p.id}</option>)}
-        </select>
-      </div>
-      <div>
-        <label style={{fontSize:13, fontWeight:700}}>Model tạo ảnh</label>
-        <div style={{marginTop:6, maxWidth:460}} onBlur={flushImageModel}>
-          <SuggestInput ariaLabel="Model tạo ảnh" placeholder={imgProvider?.defaultImageModel ? `Mặc định: ${imgProvider.defaultImageModel}` : 'Mặc định của provider'} value={imageConfig.model} options={distinctSortedLabels([...(imgProvider?.models||[]), imgProvider?.defaultImageModel||''])} onChange={handleImageModelChange}/>
+    {subTab==='model' && <div style={{display:'flex', flexDirection:'column', gap:16}}>
+      <h2 style={{fontSize:16, margin:0}}>Model AI</h2>
+      <p style={{fontSize:13, color:'#777', margin:0}}>Chọn model viết nội dung và model tạo ảnh. Hai mục có thể dùng provider khác nhau; AI Content vẫn có thể đổi model cho từng bài.</p>
+      <div className="panel" style={{padding:20, display:'flex', flexDirection:'column', gap:12}}>
+        <h3 style={{fontSize:15, margin:0}}>Model viết content</h3>
+        <div>
+          <label style={{fontSize:13, fontWeight:700}}>Provider viết content</label>
+          <select aria-label="Provider viết content" value={activeId} onChange={e=>selectContentProvider(e.target.value)} disabled={!desktop || loading} style={{display:'block', width:'100%', maxWidth:460, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}>
+            {providers.length===0 && <option value="">Chưa có provider — thêm ở tab Cài đặt Provider</option>}
+            {providers.map(p=> <option key={p.id} value={p.id}>{p.displayName || p.id}{p.hasApiKey ? '' : ' — chưa có key'}</option>)}
+          </select>
         </div>
-      </div>
-      <div>
-        <label style={{fontSize:13, fontWeight:700}}>Kích thước ảnh</label>
-        <select aria-label="Kích thước ảnh" value={imageConfig.size} onChange={e=>saveImageConfig({ size: e.target.value })} disabled={!desktop || loading} style={{display:'block', width:'100%', maxWidth:460, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}>
-          {IMAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-      </div>
-      <div>
-        <label style={{fontSize:13, fontWeight:700}}>Thư mục lưu ảnh</label>
-        <div style={{display:'flex', gap:8, marginTop:6, flexWrap:'wrap'}}>
-          <input readOnly value={imageConfig.saveDir} placeholder="Mặc định: chỉ lưu trong thư viện media của ứng dụng" style={{flex:'1 1 280px', maxWidth:460, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', fontSize:13, background:'#f9fafb'}}/>
-          <button className="outline" onClick={chooseImageFolder} disabled={!desktop || loading} style={{height:36}}>Chọn thư mục</button>
-          <button className="outline" onClick={()=>saveImageConfig({ saveDir: '' })} disabled={!desktop || loading || !imageConfig.saveDir} style={{height:36}}>Bỏ chọn</button>
+        <div>
+          <label style={{fontSize:13, fontWeight:700}}>Model viết content</label>
+          <select aria-label="Model viết content" value={activeProvider?.defaultModel || activeProvider?.models?.[0] || ''} onChange={e=>saveContentModel(e.target.value)} disabled={!desktop || loading || !activeProvider} style={{display:'block', width:'100%', maxWidth:460, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}>
+            {(!activeProvider || (!activeProvider.defaultModel && (!activeProvider.models || activeProvider.models.length===0))) && <option value="">Chưa có model — thêm ở tab Cài đặt Provider</option>}
+            {distinctSortedLabels([...(activeProvider?.models||[]), activeProvider?.defaultModel || '']).map(m=> <option key={m} value={m}>{m}</option>)}
+          </select>
         </div>
-        <div style={{fontSize:12, color:'#999', marginTop:4}}>Ảnh luôn được lưu vào thư viện media để xem trước và đăng bài; thư mục bạn chọn nhận thêm một bản sao.</div>
+        {activeProvider && !activeProvider.hasApiKey && <div className="error-box">Provider này chưa có API key — nhập ở tab Cài đặt Provider.</div>}
       </div>
-      {imgProvider && !imgProvider.hasApiKey && <div className="error-box">Provider tạo ảnh chưa có API key — hãy nhập ở mục 1.</div>}
-      {imageFolderErr && <div className="error-box">{imageFolderErr}</div>}
-    </div>
+      <div className="panel" style={{padding:20, display:'flex', flexDirection:'column', gap:12}}>
+        <h3 style={{fontSize:15, margin:0}}>Model tạo ảnh</h3>
+        <div>
+          <label style={{fontSize:13, fontWeight:700}}>Provider tạo ảnh</label>
+          <select aria-label="Provider tạo ảnh" value={imageConfig.providerId} onChange={e=>handleImageProviderChange(e.target.value)} disabled={!desktop || loading} style={{display:'block', width:'100%', maxWidth:460, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}>
+            <option value="">Theo provider AI content{activeProvider ? ` (${activeProvider.displayName || activeProvider.id})` : ''}</option>
+            {providers.map(p => <option key={p.id} value={p.id}>{p.displayName || p.id}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{fontSize:13, fontWeight:700}}>Model tạo ảnh</label>
+          <select aria-label="Model tạo ảnh" value={imageConfig.model} onChange={e=>saveImageConfig({ model: e.target.value })} disabled={!desktop || loading} style={{display:'block', width:'100%', maxWidth:460, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}>
+            <option value="">Mặc định của provider</option>
+            {distinctSortedLabels([...(imgProvider?.models||[]), imageConfig.model || '', imgProvider?.defaultImageModel || '']).filter(Boolean).map(m=> <option key={m} value={m}>{m}</option>)}
+          </select>
+          {imgProvider?.defaultImageModel && !imageConfig.model && <div style={{fontSize:12, color:'#999', marginTop:4}}>Provider còn model tạo ảnh cũ: {imgProvider.defaultImageModel} — chỉ dùng khi ô trên để trống.</div>}
+        </div>
+        <div>
+          <label style={{fontSize:13, fontWeight:700}}>Kích thước ảnh</label>
+          <select aria-label="Kích thước ảnh" value={imageConfig.size} onChange={e=>saveImageConfig({ size: e.target.value })} disabled={!desktop || loading} style={{display:'block', width:'100%', maxWidth:460, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}>
+            {IMAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+        <div>
+          <label style={{fontSize:13, fontWeight:700}}>Thư mục lưu ảnh</label>
+          <div style={{display:'flex', gap:8, marginTop:6, flexWrap:'wrap'}}>
+            <input readOnly value={imageConfig.saveDir} placeholder="Mặc định: chỉ lưu trong thư viện media của ứng dụng" style={{flex:'1 1 280px', maxWidth:460, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', fontSize:13, background:'#f9fafb'}}/>
+            <button className="outline" onClick={chooseImageFolder} disabled={!desktop || loading} style={{height:36}}>Chọn thư mục</button>
+            <button className="outline" onClick={()=>saveImageConfig({ saveDir: '' })} disabled={!desktop || loading || !imageConfig.saveDir} style={{height:36}}>Bỏ chọn</button>
+          </div>
+          <div style={{fontSize:12, color:'#999', marginTop:4}}>Ảnh luôn được lưu vào thư viện media để xem trước và đăng bài; thư mục bạn chọn nhận thêm một bản sao.</div>
+        </div>
+        {imgProvider && !imgProvider.hasApiKey && <div className="error-box">Provider tạo ảnh chưa có API key — nhập ở tab Cài đặt Provider.</div>}
+        {imageFolderErr && <div className="error-box">{imageFolderErr}</div>}
+      </div>
+    </div>}
 
-    <div>
+    {subTab==='ket-noi' && <div>
       <h2 style={{fontSize:16, margin:'0 0 10px'}}>Kết nối Facebook</h2>
       <div className="panel" style={{padding:20, display:'flex', flexDirection:'column', gap:18}}>
 {err && <div className="error-box">{err}</div>}
@@ -578,7 +565,7 @@ function SettingsPage() {
         <span>Hiện tại: file <code>secure-credentials.json</code> (plaintext) trong AppData — chưa bật keyring hệ điều hành. Bản fallback chỉ bị xóa sau khi keyring ghi và đọc lại được. Không bao giờ ghi vào <code>media-index.json</code> hay localStorage.</span>
       </div>
       </div>
-    </div>
+    </div>}
     {showPublish && <PublishModal onClose={()=>setShowPublish(false)} onSuccess={()=>{}} />}
   </section>
 }
@@ -1176,7 +1163,7 @@ function AiContentPage() {
           </div>
           <div style={{fontSize:12, color:'#999', marginTop:4, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}>{imageStylePreview || 'Chưa có nội dung style ảnh'}</div>
         </div>
-        <div style={{fontSize:13, color:'#555'}}>Ảnh: <b>{imageProvider?.displayName || 'Theo provider AI content'}</b> • <b>{imageConfig.model.trim() || imageProvider?.defaultImageModel || 'model mặc định'}</b> • {imageConfig.size} — cấu hình trong Cài đặt → 3. AI Image.</div>
+        <div style={{fontSize:13, color:'#555'}}>Ảnh: <b>{imageProvider?.displayName || 'Theo provider AI content'}</b> • <b>{imageConfig.model.trim() || imageProvider?.defaultImageModel || 'model mặc định'}</b> • {imageConfig.size} — cấu hình trong Cài đặt → tab Model AI.</div>
         <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
           <button className="primary" onClick={()=>generateImageFor(title, body)} disabled={!desktop || imageBusy || busy || (!title.trim() && !body.trim())} style={{height:36}}><Sparkles size={16}/> {imageBusy ? 'Đang tạo ảnh...' : (imageErr ? 'Thử tạo lại ảnh' : 'Tạo ảnh')}</button>
           <span style={{fontSize:12, color:'#999'}}>Cần có Tiêu đề hoặc Nội dung. Ảnh tối đa 10MB, định dạng PNG/JPEG/WEBP/GIF.</span>

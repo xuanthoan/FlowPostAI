@@ -501,7 +501,7 @@ pub async fn generate_image<R: Runtime>(
     );
     if model.trim().is_empty() {
         return Err(
-            "Chưa cấu hình model tạo ảnh. Vào Providers để chọn \"Model mặc định để tạo ảnh\"."
+            "Chưa cấu hình model tạo ảnh. Vào Cài đặt → tab Model AI để chọn model tạo ảnh."
                 .to_string(),
         );
     }
