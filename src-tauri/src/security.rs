@@ -366,6 +366,7 @@ mod tests {
         delete_secret_hybrid(Some(&handle), &key).unwrap();
         assert_eq!(get_secret_hybrid(Some(&handle), &key).unwrap(), None);
         let _ = std::fs::remove_dir_all(&dir);
+        TEST_FALLBACK_DIR.with(|d| *d.borrow_mut() = None);
     }
 
     #[test]
@@ -388,6 +389,7 @@ mod tests {
         let _ = delete_secret_hybrid(Some(&handle), &key);
         set_fallback_at(&dir, &key, "").unwrap();
         let _ = std::fs::remove_dir_all(&dir);
+        TEST_FALLBACK_DIR.with(|d| *d.borrow_mut() = None);
     }
 
     #[test]

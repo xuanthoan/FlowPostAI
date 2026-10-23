@@ -393,7 +393,7 @@ function SettingsPage() {
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
   return <section className="media-page">
-    <div className="page-heading"><div><p>BẢO MẬT CỤC BỘ</p><h1>Cài đặt</h1><span>Token và API key được lưu trong Credential Manager / Keychain của hệ điều hành, không bao giờ lưu trong frontend hay file JSON.</span></div></div>
+    <div className="page-heading"><div><p>BẢO MẬT CỤC BỘ</p><h1>Cài đặt</h1><span>Token và API key được lưu trong file <code>secure-credentials.json</code> (plaintext) tại thư mục dữ liệu ứng dụng; frontend không nhận lại giá trị đã lưu.</span></div></div>
     {!desktop && <div className="desktop-notice"><HardDrive size={23}/><div><strong>Hãy mở bằng ứng dụng FlowPost AI Desktop</strong><span>Chức năng bảo mật chỉ hoạt động trong bản Tauri.</span></div></div>}
     <div style={{display:'flex', gap:8, marginBottom:14}}>
       <button className={subTab==='Kết nối'?'primary':'outline'} onClick={()=>{ setSubTab('Kết nối'); setErr(''); setMsg('') }} style={{height:32}}><HardDrive size={14}/> Kết nối</button>
@@ -404,7 +404,7 @@ function SettingsPage() {
     {msg && <div className="desktop-notice" style={{background:'#eef7ee', borderColor:'#cde9cd', color:'#2e6b2e'}}><CircleCheck size={18}/><span>{msg}</span></div>}
       <div>
         <h2 style={{fontSize:15, margin:'0 0 8px'}}>Facebook Token</h2>
-        <p style={{fontSize:13, color:'#777', margin:'0 0 10px'}}>Dùng cho Graph API đăng bài. Token được mã hóa trong OS vault. Frontend chỉ biết trạng thái <b>{status.hasFacebookToken ? '●●●● đã lưu' : 'chưa lưu'}</b>.</p>
+        <p style={{fontSize:13, color:'#777', margin:'0 0 10px'}}>Dùng cho Graph API đăng bài. Token được lưu trong file <code>secure-credentials.json</code> (plaintext) tại thư mục dữ liệu ứng dụng. Frontend chỉ biết trạng thái <b>{status.hasFacebookToken ? '●●●● đã lưu' : 'chưa lưu'}</b>.</p>
         <div style={{display:'flex', gap:8}}>
           <input type="password" placeholder={status.hasFacebookToken ? 'Đã lưu ●●●● — nhập mới để ghi đè' : 'Nhập Facebook User/Page Access Token'} value={fbInput} onChange={e=>setFbInput(e.target.value)} disabled={!desktop || busy} style={{flex:1, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', fontSize:14}}/>
           <button className="primary" onClick={saveFb} disabled={!desktop || busy} style={{height:36}}><Zap size={14}/> Lưu</button>
