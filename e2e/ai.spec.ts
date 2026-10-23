@@ -15,6 +15,8 @@ window.__ACTIVE_ID__ = 'p1';
 window.__UPDATE_CALLS__ = [];
 window.__IMAGE_CONFIG__ = { providerId: 'p1', model: 'img-model', saveDir: '', styleId: 'cinematic', size: '1024x1024' };
 window.__ACTIVE_CALLS__ = [];
+window.__GRAPH_CALLS__ = [];
+window.__LOCAL_CALLS__ = [];
 window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
   if (cmd === 'generate_content') {
     const payload = args?.payload;
@@ -102,6 +104,31 @@ window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
   }
   if (cmd === 'credential_status') return { hasFacebookToken: false, hasAiProviderKey: true };
   if (cmd === 'get_scheduler_config') return { selectedPageId: '' };
+  if (cmd === 'list_content') { window.__LOCAL_CALLS__.push(cmd); return []; }
+  if (cmd === 'list_schedule') { window.__LOCAL_CALLS__.push(cmd); return []; }
+  if (cmd === 'list_facebook_pages') {
+    window.__GRAPH_CALLS__.push(cmd);
+    return [{ id: 'page-1', name: 'Sống Tích Cực' }];
+  }
+  if (cmd === 'list_page_posts') {
+    window.__GRAPH_CALLS__.push(cmd);
+    return { data: [
+      { id: 'page-1_1', message: 'Bài viết 1', created_time: '2026-10-20T08:00:00+0000', full_picture: 'https://example.test/1.jpg' },
+      { id: 'page-1_2', message: 'Bài viết 2', created_time: '2026-10-19T08:00:00+0000' },
+      { id: 'page-1_3', message: 'Bài viết 3', created_time: '2026-10-18T08:00:00+0000' },
+    ]};
+  }
+  if (cmd === 'get_post_insights') {
+    window.__GRAPH_CALLS__.push(cmd);
+    return { data: [
+      { name: 'post_impressions', values: [{ value: 100 }] },
+      { name: 'post_impressions_unique', values: [{ value: 50 }] },
+      { name: 'post_engaged_users', values: [{ value: 3 }] },
+      { name: 'post_clicks', values: [{ value: 2 }] },
+      { name: 'post_reactions_by_type_total', values: [{ value: { like: 4, love: 1 } }] },
+      { name: 'post_video_views', values: [{ value: 0 }] },
+    ]};
+  }
   throw new Error('Unknown mock command: ' + cmd);
 };
 `;
@@ -249,5 +276,55 @@ test.describe('AI generate_content E2E (real server)', () => {
     await expect(page.getByText('AI tạo ảnh đang gặp sự cố')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Thử tạo lại ảnh' })).toBeVisible();
     await expect(page.locator('textarea').nth(1)).toHaveValue('Nội dung được tạo bởi mock');
+  });
+
+  test('Report loads Facebook data only when clicking Tải báo cáo', async ({ page }) => {
+    await expect(page.getByText('Chưa tải báo cáo')).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__LOCAL_CALLS__.length))
+      .toBeGreaterThanOrEqual(2);
+
+    const graphOnMount: string[] = await page.evaluate(() => (window as any).__GRAPH_CALLS__);
+    expect(graphOnMount).toEqual([]);
+
+    await page.getByRole('button', { name: 'Cài đặt', exact: true }).click();
+    await page.getByRole('button', { name: 'Tổng quan', exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__LOCAL_CALLS__.length))
+      .toBeGreaterThanOrEqual(4);
+
+    const graphAfterTabSwitch: string[] = await page.evaluate(() => (window as any).__GRAPH_CALLS__);
+    expect(graphAfterTabSwitch).toEqual([]);
+    await expect(page.getByText('Chưa tải báo cáo')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Tải báo cáo', exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__GRAPH_CALLS__.length))
+      .toBe(5);
+
+    const graphCalls: string[] = await page.evaluate(() => (window as any).__GRAPH_CALLS__);
+    expect(graphCalls).toEqual([
+      'list_facebook_pages',
+      'list_page_posts',
+      'get_post_insights',
+      'get_post_insights',
+      'get_post_insights',
+    ]);
+
+    const totalCard = page.locator('.stat-card').filter({ hasText: 'Tổng tương tác' });
+    await expect(totalCard.locator('.stat-row strong')).toHaveText('30');
+
+    await expect(page.getByText(/Cập nhật lúc \d{2}:\d{2}/)).toBeVisible();
+
+    const graphCountAfterReport = graphCalls.length;
+    const localCountAfterReport = await page.evaluate(() => (window as any).__LOCAL_CALLS__.length);
+    await page.getByRole('button', { name: 'Cài đặt', exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__LOCAL_CALLS__.length))
+      .toBeGreaterThan(localCountAfterReport);
+    await page.getByRole('button', { name: 'Tổng quan', exact: true }).click();
+
+    const graphAfterSecondSwitch: string[] = await page.evaluate(() => (window as any).__GRAPH_CALLS__);
+    expect(graphAfterSecondSwitch).toHaveLength(graphCountAfterReport);
   });
 });
