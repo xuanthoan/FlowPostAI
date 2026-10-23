@@ -12,6 +12,23 @@ fn entry_for(key: &str) -> Result<Entry, String> {
     Entry::new(SERVICE, key).map_err(|e| e.to_string())
 }
 
+/// Ghi vào keyring và xác minh lại bằng một Entry MỚI.
+/// Chỉ trả true khi giá trị thật sự đọc được từ store của nền tảng.
+/// Lý do: mock store giữ dữ liệu trong chính Entry, nên đọc lại trên
+/// cùng Entry luôn "thành công" dù không có persistence.
+fn keyring_write_verified(key: &str, value: &str) -> bool {
+    let Ok(entry) = entry_for(key) else {
+        return false;
+    };
+    if entry.set_password(value).is_err() {
+        return false;
+    }
+    match entry_for(key).and_then(|fresh| fresh.get_password().map_err(|e| e.to_string())) {
+        Ok(read_back) => read_back == value,
+        Err(_) => false,
+    }
+}
+
 // --- File fallback ---
 
 fn fallback_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
@@ -96,13 +113,8 @@ pub fn set_secret_hybrid<R: Runtime>(app: Option<&AppHandle<R>>, key: &str, valu
     if value.trim().is_empty() {
         return delete_secret_hybrid(app, key);
     }
-    // Keyring là nơi lưu chính. Fallback plaintext chỉ ghi khi keyring thất bại.
-    let keyring_ok = match entry_for(key) {
-        Ok(e) => e.set_password(value).is_ok(),
-        Err(_) => false,
-    };
-    if keyring_ok {
-        // Keyring đã có giá trị mới: xóa bản sao plaintext cũ (best-effort).
+    // Keyring là nơi lưu chính, nhưng chỉ khi ghi xong đọc lại được.
+    if keyring_write_verified(key, value) {
         if let Some(a) = app {
             let _ = delete_fallback(a, key);
         }
@@ -145,10 +157,7 @@ pub fn get_secret_hybrid<R: Runtime>(app: Option<&AppHandle<R>>, key: &str) -> R
                     return Ok(None);
                 };
                 // Fallback còn giá trị: thử migrate sang keyring rồi xóa fallback.
-                let migrated = entry_for(key)
-                    .map(|e| e.set_password(&value).is_ok())
-                    .unwrap_or(false);
-                if migrated {
+                if keyring_write_verified(key, &value) {
                     let _ = delete_fallback(a, key);
                 }
                 Ok(Some(value))
@@ -329,6 +338,41 @@ mod tests {
         assert_eq!(get_fallback_at(&dir, fb_key).unwrap(), None);
         assert_eq!(get_fallback_at(&dir, ai_provider_key).unwrap(), Some("ai_provider_secret".into()));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_set_secret_hybrid_persists_across_entries() {
+        let app = tauri::test::mock_app();
+        let handle = app.handle().clone();
+        let key = format!("__test_hybrid_persist_{}", uuid::Uuid::new_v4());
+        assert_eq!(get_secret_hybrid(Some(&handle), &key).unwrap(), None);
+        set_secret_hybrid(Some(&handle), &key, "persist_probe_12345").unwrap();
+        assert_eq!(
+            get_secret_hybrid(Some(&handle), &key).unwrap(),
+            Some("persist_probe_12345".to_string())
+        );
+        delete_secret_hybrid(Some(&handle), &key).unwrap();
+        assert_eq!(get_secret_hybrid(Some(&handle), &key).unwrap(), None);
+    }
+
+    #[test]
+    fn test_get_secret_hybrid_migration_keeps_value() {
+        let app = tauri::test::mock_app();
+        let handle = app.handle().clone();
+        let key = format!("__test_hybrid_migrate_{}", uuid::Uuid::new_v4());
+        let _ = delete_secret_hybrid(Some(&handle), &key);
+        let dir = handle.path().app_data_dir().unwrap();
+        set_fallback_at(&dir, &key, "migrate_probe_67890").unwrap();
+        assert_eq!(
+            get_secret_hybrid(Some(&handle), &key).unwrap(),
+            Some("migrate_probe_67890".to_string())
+        );
+        assert_eq!(
+            get_secret_hybrid(Some(&handle), &key).unwrap(),
+            Some("migrate_probe_67890".to_string())
+        );
+        let _ = delete_secret_hybrid(Some(&handle), &key);
+        set_fallback_at(&dir, &key, "").unwrap();
     }
 
     #[test]

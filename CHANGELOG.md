@@ -2,6 +2,17 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-23 — Sửa lỗi mất API key/token lưu im lặng
+
+### Fixed
+- `src-tauri/src/security.rs` — chỉ xoá bản fallback plaintext sau khi ghi keyring và **đọc lại được** giá trị vừa ghi bằng một `Entry` mới; nếu không đọc lại được thì ghi fallback và giữ nguyên. Áp dụng cho cả nhánh migrate.
+- `src-tauri/src/security.rs` — thêm test hồi quy set→get qua `Entry` mới và migrate fallback đọc hai lần.
+
+### Notes
+- Nguyên nhân: `keyring` không có backend nền tảng nào được bật, nên trên Windows mọi lần ghi chỉ vào mock store trong RAM rồi bị coi là thành công và xoá mất bản fallback.
+- Bản build này **chưa bật** backend Windows Credential Manager (lỗi loader của `windows-sys 0.60` trên môi trường build hiện tại); secret dùng fallback plaintext cho tới khi có task riêng.
+- API key/token đã "lưu" bằng bản lỗi trước đây không thể khôi phục; cần nhập lại.
+
 ## [Unreleased] - 2026-10-22 — AI Content: tạo ảnh minh hoạ bằng AI
 
 ### Added

@@ -55,7 +55,7 @@ FlowPost AI dùng token do bạn tự tạo và dán vào ứng dụng. Token c�
 3. Bấm `Tải Trang` → backend gọi `GET /me/accounts?fields=id,name,access_token`, đổi User Token thành Page Token và lưu `fb_page_{id}`; frontend chỉ thấy `id/name` (`facebook.rs:list_facebook_pages`).
 4. Chọn `Trang mặc định cho Lịch`. Danh sách Trang và bài viết gần đây được tải khi mở tab Dashboard hoặc khi chuyển tab; insights 6 metric chỉ được tải khi bạn bấm `Làm mới` trong khung "Bài viết gần đây". Hover `TIẾP CẬN` hiện bảng 2 cột; nếu thiếu `read_insights` thì `reach` giữ `—`.
 
-> Lưu ý lưu trữ: token được lưu trong keyring của hệ điều hành. Từ giai đoạn bảo mật, fallback plaintext chỉ được ghi khi keyring thất bại; giá trị cũ vẫn được đọc để migrate. Chi tiết và giới hạn: xem `SECURITY.md`.
+> Lưu ý lưu trữ: bản build này chưa bật backend keyring của hệ điều hành, nên secret được lưu trong `secure-credentials.json` (plaintext) tại `app_data_dir`. Cơ chế ghi keyring vẫn tồn tại và chỉ xóa bản fallback sau khi **đọc lại được** giá trị vừa ghi; giá trị cũ vẫn được đọc để migrate. Chi tiết và giới hạn: xem `SECURITY.md`.
 
 ### Thay đổi hành vi gần đây
 
@@ -106,4 +106,4 @@ Thêm vào đó:
 
 Rust backend tạo thư mục `media` bên trong app data directory của hệ điều hành và lưu `media-index.json` tại cùng vị trí. Mỗi file được đổi sang UUID khi sao chép để tránh trùng tên; tên gốc, loại file, dung lượng và thời điểm nhập vẫn được giữ trong index.
 
-Token Facebook và API key OpenAI Compatible Provider được lưu trong keyring của hệ điều hành; fallback plaintext `secure-credentials.json` trong `app_data_dir` chỉ được ghi khi keyring thất bại (xem `SECURITY.md`). Không đưa token vào frontend, file index hay git. Lỗi mạng và body lỗi không phải JSON đã được scrub URL/token trước khi lưu, còn lỗi Graph dạng JSON chỉ giữ `message` của Meta (không chứa token) nên `schedule-index.json` không còn nhận token qua `lastError`; tuy nhiên file do phiên bản cũ ghi vẫn có thể còn token và cần được kiểm tra/quay vòng thủ công.
+Token Facebook và API key OpenAI Compatible Provider được lưu trong `secure-credentials.json` (plaintext) tại `app_data_dir`; bản fallback chỉ bị xóa sau khi keyring ghi và đọc lại được giá trị vừa ghi (xem `SECURITY.md`). Không đưa token vào frontend, file index hay git. Lỗi mạng và body lỗi không phải JSON đã được scrub URL/token trước khi lưu, còn lỗi Graph dạng JSON chỉ giữ `message` của Meta (không chứa token) nên `schedule-index.json` không còn nhận token qua `lastError`; tuy nhiên file do phiên bản cũ ghi vẫn có thể còn token và cần được kiểm tra/quay vòng thủ công.

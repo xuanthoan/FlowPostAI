@@ -430,7 +430,7 @@ function SettingsPage() {
       <div style={{height:1, background:'#eee'}}/>
       <div style={{background:'#f7f6fe', border:'1px solid #eceafa', borderRadius:8, padding:12, fontSize:13, color:'#5e58a6'}}>
         <strong style={{display:'flex', alignItems:'center', gap:6}}><HardDrive size={14}/> Lưu trữ: </strong>
-        <span>Windows Credential Manager / macOS Keychain / Linux Secret Service — fallback file <code>secure-credentials.json</code> trong AppData (atomic write). Không bao giờ ghi vào <code>media-index.json</code> hay localStorage.</span>
+        <span>Hiện tại: file <code>secure-credentials.json</code> (plaintext) trong AppData — chưa bật keyring hệ điều hành. Bản fallback chỉ bị xóa sau khi keyring ghi và đọc lại được. Không bao giờ ghi vào <code>media-index.json</code> hay localStorage.</span>
       </div>
     </div> : <ProvidersPanel />}
     {showPublish && <PublishModal onClose={()=>setShowPublish(false)} onSuccess={()=>{}} />}
