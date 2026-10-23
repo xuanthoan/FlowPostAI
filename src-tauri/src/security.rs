@@ -31,7 +31,17 @@ fn keyring_write_verified(key: &str, value: &str) -> bool {
 
 // --- File fallback ---
 
+#[cfg(test)]
+thread_local! {
+    static TEST_FALLBACK_DIR: std::cell::RefCell<Option<PathBuf>> =
+        std::cell::RefCell::new(None);
+}
+
 fn fallback_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
+    #[cfg(test)]
+    if let Some(dir) = TEST_FALLBACK_DIR.with(|d| d.borrow().clone()) {
+        return Ok(dir.join("secure-credentials.json"));
+    }
     let dir = app
         .path()
         .app_data_dir()
@@ -342,6 +352,8 @@ mod tests {
 
     #[test]
     fn test_set_secret_hybrid_persists_across_entries() {
+        let dir = unique_temp_dir("flowpost_hybrid_persist");
+        TEST_FALLBACK_DIR.with(|d| *d.borrow_mut() = Some(dir.clone()));
         let app = tauri::test::mock_app();
         let handle = app.handle().clone();
         let key = format!("__test_hybrid_persist_{}", uuid::Uuid::new_v4());
@@ -353,15 +365,17 @@ mod tests {
         );
         delete_secret_hybrid(Some(&handle), &key).unwrap();
         assert_eq!(get_secret_hybrid(Some(&handle), &key).unwrap(), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn test_get_secret_hybrid_migration_keeps_value() {
+        let dir = unique_temp_dir("flowpost_hybrid_migrate");
+        TEST_FALLBACK_DIR.with(|d| *d.borrow_mut() = Some(dir.clone()));
         let app = tauri::test::mock_app();
         let handle = app.handle().clone();
         let key = format!("__test_hybrid_migrate_{}", uuid::Uuid::new_v4());
         let _ = delete_secret_hybrid(Some(&handle), &key);
-        let dir = handle.path().app_data_dir().unwrap();
         set_fallback_at(&dir, &key, "migrate_probe_67890").unwrap();
         assert_eq!(
             get_secret_hybrid(Some(&handle), &key).unwrap(),
@@ -373,6 +387,7 @@ mod tests {
         );
         let _ = delete_secret_hybrid(Some(&handle), &key);
         set_fallback_at(&dir, &key, "").unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
