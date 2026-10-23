@@ -120,10 +120,7 @@ function MediaLibrary() {
   </section>
 }
 
-function ProvidersPanel() {
-  const desktop = isDesktop()
-  const [providers, setProviders] = useState([])
-  const [activeId, setActiveId] = useState('')
+function ProvidersPanel({ desktop, providers, activeId, onChanged }) {
   const [form, setForm] = useState({ id: '', displayName: '', baseUrl: DEFAULT_LOCAL_BASE_URL, apiKey: '', models: [], defaultModel: '', defaultImageModel: '' })
   const [presetKey, setPresetKey] = useState('')
   const [hasApiKey, setHasApiKey] = useState(false)
@@ -132,35 +129,34 @@ function ProvidersPanel() {
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [mode, setMode] = useState('create')
+  const skipAutoFill = useRef(false)
 
-  const load = async () => {
-    if (!desktop) return
-    try {
-      const list = await invokeDesktop('list_providers')
-      setProviders(list)
-      if (list.length > 0) {
-        let active = list[0]
-        try {
-          const a = await invokeDesktop('get_active_provider')
-          const found = list.find(p => p.id === a.id)
-          if (found) active = found
-        } catch (_e) { void _e }
-        setActiveId(active.id)
-        setForm({ id: active.id, displayName: active.displayName || active.id, baseUrl: active.baseUrl, apiKey: '', models: active.models || [], defaultModel: active.defaultModel || '', defaultImageModel: active.defaultImageModel || '' })
-        setHasApiKey(!!active.hasApiKey)
-        setMode('edit')
-        setPresetKey('')
-      } else {
-        setMode('create')
-        setActiveId('')
-      }
-    } catch (e) { setErr(String(e)) }
-  }
+  const emptyForm = () => ({ id: '', displayName: '', baseUrl: DEFAULT_LOCAL_BASE_URL, apiKey: '', models: [], defaultModel: '', defaultImageModel: '' })
+  const fillForm = (p) => ({ id: p.id, displayName: p.displayName || p.id, baseUrl: p.baseUrl, apiKey: '', models: p.models || [], defaultModel: p.defaultModel || '', defaultImageModel: p.defaultImageModel || '' })
+
+  // Follow the shared provider list without discarding unsaved edits for the provider being edited.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (providers.length === 0) { setMode('create'); return }
+    if (skipAutoFill.current) { skipAutoFill.current = false; return }
+    const selected = providers.find(p => p.id === form.id)
+    if (selected) {
+      setHasApiKey(!!selected.hasApiKey)
+      return
+    }
+    const next = providers.find(p => p.id === activeId) || providers[0]
+    if (!next) return
+    setForm(fillForm(next))
+    setHasApiKey(!!next.hasApiKey)
+    setMode('edit')
+    setPresetKey('')
+  }, [providers]) // eslint-disable-line react-hooks/exhaustive-deps
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const selectProvider = (id) => {
     const p = providers.find(x => x.id === id)
     if (!p) return
-    setForm({ id: p.id, displayName: p.displayName || p.id, baseUrl: p.baseUrl, apiKey: '', models: p.models || [], defaultModel: p.defaultModel || '', defaultImageModel: p.defaultImageModel || '' })
+    setForm(fillForm(p))
     setHasApiKey(!!p.hasApiKey)
     setMode('edit')
     setPresetKey('')
@@ -191,17 +187,6 @@ function ProvidersPanel() {
     setErr('')
   }
 
-  const setActive = async (id) => {
-    setBusy(true); setErr(''); setMsg('')
-    try {
-      await invokeDesktop('set_active_provider', { id })
-      await load()
-      setMsg('Đã đặt provider đang dùng')
-    } catch (e) { setErr(String(e)) } finally { setBusy(false) }
-  }
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
   const handleSave = async () => {
     if (!form.id.trim()) { setErr('Provider ID không được để trống'); return }
     if (!form.baseUrl.trim()) { setErr('Base URL không được để trống'); return }
@@ -210,15 +195,18 @@ function ProvidersPanel() {
     try {
       if (mode === 'create') {
         const payload = { id: form.id.trim().toLowerCase(), displayName: form.displayName || null, baseUrl: form.baseUrl.trim(), protocol: 'openai-completions', models: form.models, defaultModel: form.defaultModel.trim(), defaultImageModel: form.defaultImageModel.trim(), apiKey: form.apiKey || null }
-        await invokeDesktop('create_provider', { payload })
+        const res = await invokeDesktop('create_provider', { payload })
+        setForm(f => ({ ...f, id: res.id, apiKey: '' }))
+        setHasApiKey(!!res.hasApiKey)
+        setMode('edit')
         setMsg('Đã tạo provider')
       } else {
         const payload = { displayName: form.displayName || null, baseUrl: form.baseUrl.trim(), protocol: 'openai-completions', models: form.models, defaultModel: form.defaultModel.trim(), defaultImageModel: form.defaultImageModel.trim(), apiKey: form.apiKey || null }
         await invokeDesktop('update_provider', { id: form.id, payload })
+        setForm(f => ({ ...f, apiKey: '' }))
         setMsg('Đã cập nhật provider')
       }
-      setForm(f => ({ ...f, apiKey: '' }))
-      await load()
+      await onChanged()
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
 
@@ -255,8 +243,7 @@ function ProvidersPanel() {
         {providers.map(p=> <div key={p.id} onClick={()=>selectProvider(p.id)} style={{display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 10px', border: p.id===form.id ? '2px solid #6558d6' : '1px solid #e8e8ed', borderRadius:8, background: p.id===activeId ? '#f0eefc' : '#fff', cursor:'pointer'}}>
           <div style={{display:'flex', alignItems:'center', gap:8}}><strong style={{fontSize:13}}>{p.displayName || p.id}</strong><span style={{width:8, height:8, borderRadius:8, background: p.hasApiKey ? '#4caf50' : '#ccc', display:'inline-block'}} title={p.hasApiKey ? 'Đã lưu API key' : 'Chưa có key'}/><span style={{fontSize:11, color:'#777'}}>{p.id}</span></div>
           <div style={{display:'flex', alignItems:'center', gap:8}}>
-            <span style={{fontSize:11, color: p.id===activeId ? '#6558d6' : '#999'}}>{p.id===activeId ? '● active' : ''} {p.id===form.id && mode==='edit' ? '● đang sửa' : ''}</span>
-            {p.id!==activeId && <button className="outline" onClick={(e)=>{ e.stopPropagation(); setActive(p.id) }} disabled={!desktop||busy} style={{height:26, fontSize:11}}>Đặt active</button>}
+            <span style={{fontSize:11, color: p.id===activeId ? '#6558d6' : '#999'}}>{p.id===activeId ? '● provider AI content' : ''} {p.id===form.id && mode==='edit' ? '● đang sửa' : ''}</span>
           </div>
         </div>)}
       </div>
@@ -265,7 +252,7 @@ function ProvidersPanel() {
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
         <div style={{display:'flex', alignItems:'center', gap:8}}><strong style={{fontSize:14}}>{form.displayName || form.id || 'Custom provider'}</strong><span style={{fontSize:12, background:'#f0eefc', color:'#6558d6', padding:'2px 7px', borderRadius:10, fontWeight:700}}>{mode==='create' ? 'Mới' : 'Đang sửa'}</span><span style={{width:8, height:8, borderRadius:8, background: hasApiKey ? '#4caf50' : '#ccc', display:'inline-block'}}/></div>
         <div style={{display:'flex', gap:6}}>
-          <button className="outline" onClick={async()=>{ if(!window.confirm('Xóa provider này?')) return; try{ await invokeDesktop('delete_provider',{id:form.id}); setMsg('Đã xóa'); await load() }catch(e){setErr(String(e))} }} disabled={!desktop || busy || providers.length<=1} title={providers.length<=1 ? 'Không thể xóa provider cuối cùng' : ''} style={{height:32, fontSize:13, color: providers.length<=1 ? '#aaa' : '#b55041', borderColor: providers.length<=1 ? '#eee' : '#f6d4cd'}}>Delete</button>
+          <button className="outline" onClick={async()=>{ if(!window.confirm('Xóa provider này?')) return; try{ await invokeDesktop('delete_provider',{id:form.id}); skipAutoFill.current = true; setForm(emptyForm()); setHasApiKey(false); setPresetKey(''); setMode('create'); setMsg('Đã xóa provider'); await onChanged() }catch(e){setErr(String(e))} }} disabled={!desktop || busy || providers.length<=1} title={providers.length<=1 ? 'Không thể xóa provider cuối cùng' : ''} style={{height:32, fontSize:13, color: providers.length<=1 ? '#aaa' : '#b55041', borderColor: providers.length<=1 ? '#eee' : '#f6d4cd'}}>Delete</button>
         </div>
       </div>
       <div style={{height:1, background:'#eee'}}/>
@@ -327,24 +314,92 @@ function ProvidersPanel() {
         </div>
       </div>
       <div style={{display:'flex', justifyContent:'flex-end', gap:8, marginTop:6}}>
-        <button className="outline" onClick={()=>{ setErr(''); setMsg(''); load() }} disabled={busy} style={{height:36}}>Cancel</button>
+        <button className="outline" onClick={()=>{ setErr(''); setMsg(''); const p = providers.find(x => x.id === form.id); if (p) { setForm(fillForm(p)); setHasApiKey(!!p.hasApiKey) } }} disabled={busy} style={{height:36}}>Cancel</button>
         <button className="primary" onClick={handleSave} disabled={!desktop || busy} style={{height:36}}><WandSparkles size={14}/> {mode==='create' ? 'Tạo provider' : 'Cập nhật provider'}</button>
       </div>
     </div>
   </div>
 }
 
+function useProviderSettings(desktop) {
+  const [providers, setProviders] = useState([])
+  const [activeId, setActiveId] = useState('')
+  const [imageConfig, setImageConfig] = useState({ providerId: '', model: '', saveDir: '', styleId: '', size: '1024x1024' })
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const imageConfigRef = useRef(imageConfig)
+
+  useEffect(() => { imageConfigRef.current = imageConfig }, [imageConfig])
+
+  const loadAll = async () => {
+    if (!desktop) { setLoading(false); return }
+    try {
+      const [list, active, cfg] = await Promise.all([
+        invokeDesktop('list_providers'),
+        invokeDesktop('get_active_provider').catch(() => null),
+        invokeDesktop('get_image_config').catch(() => null),
+      ])
+      const nextProviders = Array.isArray(list) ? list : []
+      const nextConfig = cfg || {}
+      setProviders(nextProviders)
+      setActiveId((active && active.id) || nextProviders[0]?.id || '')
+      setImageConfig({
+        providerId: nextConfig.providerId || '',
+        model: nextConfig.model || '',
+        saveDir: nextConfig.saveDir || '',
+        styleId: nextConfig.styleId || '',
+        size: nextConfig.size || '1024x1024',
+      })
+      setError('')
+    } catch (e) { setError(String(e)) } finally { setLoading(false) }
+  }
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadAll() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const selectContentProvider = async (id) => {
+    try {
+      await invokeDesktop('set_active_provider', { id })
+      setActiveId(id)
+      setError('')
+    } catch (e) { setError(String(e)) }
+  }
+
+  const saveImageConfig = async (patch) => {
+    const next = { ...imageConfigRef.current, ...patch }
+    imageConfigRef.current = next
+    setImageConfig(next)
+    if (!desktop) return next
+    try {
+      await invokeDesktop('set_image_config', { config: next })
+      setError('')
+    } catch (e) { setError(String(e)) }
+    return next
+  }
+
+  return { providers, activeId, imageConfig, setImageConfig, loading, error, imageConfigRef, loadAll, selectContentProvider, saveImageConfig }
+}
+
 function SettingsPage() {
   const desktop = isDesktop()
+  const {
+    providers, activeId, imageConfig, setImageConfig, loading,
+    error: providerErr, loadAll, selectContentProvider, saveImageConfig,
+  } = useProviderSettings(desktop)
   const [fbInput, setFbInput] = useState('')
   const [status, setStatus] = useState({ hasFacebookToken: false })
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [showPublish, setShowPublish] = useState(false)
+  const [imageFolderErr, setImageFolderErr] = useState('')
 
   const [pages, setPages] = useState([])
   const [selectedPageId, setSelectedPageId] = useState('')
+  const imageModelSaveTimer = useRef(null)
+
+  const activeProvider = providers.find(p => p.id === activeId) || null
+  const imgProvider = providers.find(p => p.id === (imageConfig.providerId || activeId)) || null
 
   const refresh = async () => {
     if (!desktop) return
@@ -360,7 +415,29 @@ function SettingsPage() {
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { refresh() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  const [subTab, setSubTab] = useState('Providers')
+  useEffect(() => () => { if (imageModelSaveTimer.current) clearTimeout(imageModelSaveTimer.current) }, [])
+
+  // Debounced so typing a model name does not hit disk on every keystroke.
+  // A pending timer must be cleared by provider changes before the config is reset.
+  const handleImageModelChange = (v) => {
+    setImageConfig(c => ({ ...c, model: v }))
+    if (imageModelSaveTimer.current) clearTimeout(imageModelSaveTimer.current)
+    imageModelSaveTimer.current = setTimeout(() => { saveImageConfig({ model: v }) }, 600)
+  }
+
+  const handleImageProviderChange = async (value) => {
+    if (imageModelSaveTimer.current) { clearTimeout(imageModelSaveTimer.current); imageModelSaveTimer.current = null }
+    await saveImageConfig({ providerId: value, model: '' })
+  }
+
+  const chooseImageFolder = async () => {
+    setImageFolderErr('')
+    try {
+      const dir = await invokeDesktop('pick_image_folder')
+      if (dir) await saveImageConfig({ saveDir: dir })
+    } catch (e) { setImageFolderErr(String(e)) }
+  }
+
   const saveFb = async () => {
     if (!fbInput.trim()) { setErr('Vui lòng nhập Facebook Token'); return }
     setBusy(true); setErr(''); setMsg('')
@@ -395,11 +472,61 @@ function SettingsPage() {
   return <section className="media-page">
     <div className="page-heading"><div><p>BẢO MẬT CỤC BỘ</p><h1>Cài đặt</h1><span>Token và API key được lưu trong file <code>secure-credentials.json</code> (plaintext) tại thư mục dữ liệu ứng dụng; frontend không nhận lại giá trị đã lưu.</span></div></div>
     {!desktop && <div className="desktop-notice"><HardDrive size={23}/><div><strong>Hãy mở bằng ứng dụng FlowPost AI Desktop</strong><span>Chức năng bảo mật chỉ hoạt động trong bản Tauri.</span></div></div>}
-    <div style={{display:'flex', gap:8, marginBottom:14}}>
-      <button className={subTab==='Kết nối'?'primary':'outline'} onClick={()=>{ setSubTab('Kết nối'); setErr(''); setMsg('') }} style={{height:32}}><HardDrive size={14}/> Kết nối</button>
-      <button className={subTab==='Providers'?'primary':'outline'} onClick={()=>{ setSubTab('Providers'); setErr(''); setMsg('') }} style={{height:32}}><WandSparkles size={14}/> Providers</button>
+    {providerErr && <div className="error-box">{providerErr}</div>}
+
+    <div>
+      <h2 style={{fontSize:16, margin:'0 0 10px'}}>1. Providers</h2>
+      <ProvidersPanel desktop={desktop} providers={providers} activeId={activeId} onChanged={loadAll}/>
     </div>
-    {subTab==='Kết nối' ? <div className="panel" style={{padding:20, display:'flex', flexDirection:'column', gap:18}}>
+
+    <div className="panel" style={{padding:20, display:'flex', flexDirection:'column', gap:12}}>
+      <h2 style={{fontSize:16, margin:0}}>2. AI Content</h2>
+      <p style={{fontSize:13, color:'#777', margin:0}}>Provider dùng để viết bài. Model có thể đổi cho từng bài trong màn AI Content.</p>
+      <select aria-label="Provider nội dung" value={activeId} onChange={e=>selectContentProvider(e.target.value)} disabled={!desktop || loading} style={{maxWidth:460, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', fontSize:14}}>
+        {providers.length === 0 && <option value="">Chưa có provider — thêm ở mục 1</option>}
+        {providers.map(p => <option key={p.id} value={p.id}>{p.displayName || p.id}{p.hasApiKey ? '' : ' — chưa có key'}</option>)}
+      </select>
+      <div style={{fontSize:13, color:'#555'}}>Model mặc định: <b>{activeProvider?.defaultModel || activeProvider?.models?.[0] || '—'}</b></div>
+      {activeProvider && !activeProvider.hasApiKey && <div className="error-box">Provider này chưa có API key — hãy nhập ở mục 1.</div>}
+    </div>
+
+    <div className="panel" style={{padding:20, display:'flex', flexDirection:'column', gap:12}}>
+      <h2 style={{fontSize:16, margin:0}}>3. AI Image</h2>
+      <div>
+        <label style={{fontSize:13, fontWeight:700}}>Provider tạo ảnh</label>
+        <select aria-label="Provider tạo ảnh" value={imageConfig.providerId} onChange={e=>handleImageProviderChange(e.target.value)} disabled={!desktop || loading} style={{display:'block', width:'100%', maxWidth:460, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}>
+          <option value="">Theo provider AI content{activeProvider ? ` (${activeProvider.displayName || activeProvider.id})` : ''}</option>
+          {providers.map(p => <option key={p.id} value={p.id}>{p.displayName || p.id}</option>)}
+        </select>
+      </div>
+      <div>
+        <label style={{fontSize:13, fontWeight:700}}>Model tạo ảnh</label>
+        <div style={{marginTop:6, maxWidth:460}}>
+          <SuggestInput ariaLabel="Model tạo ảnh" placeholder={imgProvider?.defaultImageModel ? `Mặc định: ${imgProvider.defaultImageModel}` : 'Mặc định của provider'} value={imageConfig.model} options={distinctSortedLabels([...(imgProvider?.models||[]), imgProvider?.defaultImageModel||''])} onChange={handleImageModelChange}/>
+        </div>
+      </div>
+      <div>
+        <label style={{fontSize:13, fontWeight:700}}>Kích thước ảnh</label>
+        <select aria-label="Kích thước ảnh" value={imageConfig.size} onChange={e=>saveImageConfig({ size: e.target.value })} disabled={!desktop || loading} style={{display:'block', width:'100%', maxWidth:460, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}>
+          {IMAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+      </div>
+      <div>
+        <label style={{fontSize:13, fontWeight:700}}>Thư mục lưu ảnh</label>
+        <div style={{display:'flex', gap:8, marginTop:6, flexWrap:'wrap'}}>
+          <input readOnly value={imageConfig.saveDir} placeholder="Mặc định: chỉ lưu trong thư viện media của ứng dụng" style={{flex:'1 1 280px', maxWidth:460, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', fontSize:13, background:'#f9fafb'}}/>
+          <button className="outline" onClick={chooseImageFolder} disabled={!desktop || loading} style={{height:36}}>Chọn thư mục</button>
+          <button className="outline" onClick={()=>saveImageConfig({ saveDir: '' })} disabled={!desktop || loading || !imageConfig.saveDir} style={{height:36}}>Bỏ chọn</button>
+        </div>
+        <div style={{fontSize:12, color:'#999', marginTop:4}}>Ảnh luôn được lưu vào thư viện media để xem trước và đăng bài; thư mục bạn chọn nhận thêm một bản sao.</div>
+      </div>
+      {imgProvider && !imgProvider.hasApiKey && <div className="error-box">Provider tạo ảnh chưa có API key — hãy nhập ở mục 1.</div>}
+      {imageFolderErr && <div className="error-box">{imageFolderErr}</div>}
+    </div>
+
+    <div>
+      <h2 style={{fontSize:16, margin:'0 0 10px'}}>Kết nối Facebook</h2>
+      <div className="panel" style={{padding:20, display:'flex', flexDirection:'column', gap:18}}>
 {err && <div className="error-box">{err}</div>}
     {msg && <div className="desktop-notice" style={{background:'#eef7ee', borderColor:'#cde9cd', color:'#2e6b2e'}}><CircleCheck size={18}/><span>{msg}</span></div>}
       <div>
@@ -432,7 +559,8 @@ function SettingsPage() {
         <strong style={{display:'flex', alignItems:'center', gap:6}}><HardDrive size={14}/> Lưu trữ: </strong>
         <span>Hiện tại: file <code>secure-credentials.json</code> (plaintext) trong AppData — chưa bật keyring hệ điều hành. Bản fallback chỉ bị xóa sau khi keyring ghi và đọc lại được. Không bao giờ ghi vào <code>media-index.json</code> hay localStorage.</span>
       </div>
-    </div> : <ProvidersPanel />}
+      </div>
+    </div>
     {showPublish && <PublishModal onClose={()=>setShowPublish(false)} onSuccess={()=>{}} />}
   </section>
 }
@@ -498,8 +626,6 @@ function AiContentPage() {
   const [imageBusy, setImageBusy] = useState(false)
   const [imageErr, setImageErr] = useState('')
   const [imageResult, setImageResult] = useState(null)
-  const imageModelSaveTimer = useRef(null)
-  const imageConfigRef = useRef(imageConfig)
 
   const loadMediaOptions = async () => {
     if (!desktop) return
@@ -561,9 +687,6 @@ function AiContentPage() {
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { loadImageSetup() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => { imageConfigRef.current = imageConfig }, [imageConfig])
-  useEffect(() => () => { if (imageModelSaveTimer.current) clearTimeout(imageModelSaveTimer.current) }, [])
 
   const loadTopics = async () => {
     if (!desktop) return
@@ -634,14 +757,6 @@ function AiContentPage() {
   const imageStylePreview = ((selectedImageStyle && selectedImageStyle.content) || '').replace(/\s+/g, ' ').trim()
   const activeImageProviderId = imageConfig.providerId || (activeProvider && activeProvider.id) || ''
   const imageProvider = imageProviders.find(p => p.id === activeImageProviderId) || null
-  const imageModelOptions = distinctSortedLabels([
-    ...((imageProvider && imageProvider.models) || []),
-    (imageProvider && imageProvider.defaultImageModel) || '',
-    imageConfig.model,
-  ].filter(Boolean))
-  const imageModelPlaceholder = (imageProvider && imageProvider.defaultImageModel)
-    ? `Mặc định: ${imageProvider.defaultImageModel}`
-    : 'Mặc định của provider'
 
   const startCreateStyle = () => {
     setCreatingStyle(true)
@@ -828,17 +943,6 @@ function AiContentPage() {
     try { await invokeDesktop('set_image_config', { config: next }) } catch (e) { setImageErr(String(e)) }
   }
 
-  const handleImageModelChange = (v) => {
-    setImageConfig(c => ({ ...c, model: v }))
-    if (!desktop) return
-    if (imageModelSaveTimer.current) clearTimeout(imageModelSaveTimer.current)
-    imageModelSaveTimer.current = setTimeout(() => {
-      const cfg = imageConfigRef.current
-      invokeDesktop('set_image_config', { config: { ...cfg, model: (cfg.model || '').trim() } })
-        .catch(e => setImageErr(String(e)))
-    }, 600)
-  }
-
   const handleSelectImageStyle = (id) => {
     const s = imageStyles.find(x => x.id === id)
     if (!s) return
@@ -933,14 +1037,6 @@ function AiContentPage() {
       applyImageStyleResult(res)
       setMsg('Đã khôi phục style ảnh mặc định')
     } catch (e) { setImageErr(String(e)) } finally { setImageStyleBusy(false) }
-  }
-
-  const chooseImageFolder = async () => {
-    if (!desktop) return
-    try {
-      const dir = await invokeDesktop('pick_image_folder')
-      if (dir) await persistImageConfig({ saveDir: dir })
-    } catch (e) { setImageErr(String(e)) }
   }
 
   const generateImageFor = async (titleText, bodyText) => {
@@ -1051,45 +1147,18 @@ function AiContentPage() {
           Tạo ảnh minh hoạ bằng AI
         </label>
         <div style={{fontSize:12, color:'#777'}}>Ảnh được tạo sau khi có nội dung, dựa trên nội dung bài viết và style ảnh bên dưới. Mỗi lần tạo 1 ảnh.</div>
-        <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 180px', gap:12}}>
-          <div>
-            <label style={{fontSize:13, fontWeight:700}}>Style ảnh</label>
-            <div style={{display:'flex', gap:6, marginTop:6}}>
-              <select value={selectedImageStyleId} onChange={e=>handleSelectImageStyle(e.target.value)} disabled={!desktop || imageBusy || imageStyleBusy} style={{flex:1, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px'}}>
-                {imageStyles.length ? imageStyles.map(s => <option key={s.id} value={s.id}>{s.name}</option>) : <option value="">Mở app desktop để tải style ảnh</option>}
-              </select>
-              <button className="outline" onClick={openEditImageStyleModal} disabled={!desktop || imageBusy || imageStyleBusy || !selectedImageStyleId} style={{height:36}}><Pencil size={14}/> Sửa</button>
-              <button className="outline" onClick={openCreateImageStyleModal} disabled={!desktop || imageBusy || imageStyleBusy} style={{height:36}}><Plus size={14}/> Thêm</button>
-            </div>
-            <div style={{fontSize:12, color:'#999', marginTop:4, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}>{imageStylePreview || 'Chưa có nội dung style ảnh'}</div>
-          </div>
-          <div>
-            <label style={{fontSize:13, fontWeight:700}}>Provider tạo ảnh</label>
-            <select value={imageConfig.providerId} onChange={e=>persistImageConfig({ providerId: e.target.value })} disabled={!desktop || imageBusy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:6}}>
-              <option value="">Provider đang dùng{activeProvider ? ` (${activeProvider.displayName || activeProvider.id})` : ''}</option>
-              {imageProviders.map(p => <option key={p.id} value={p.id}>{p.displayName || p.id}</option>)}
-            </select>
-            <div style={{fontSize:13, fontWeight:700, marginTop:8}}>Model tạo ảnh</div>
-            <div style={{marginTop:6}}>
-              <SuggestInput ariaLabel="Model tạo ảnh" placeholder={imageModelPlaceholder} value={imageConfig.model} onChange={handleImageModelChange} options={imageModelOptions}/>
-            </div>
-          </div>
-          <div>
-            <label style={{fontSize:13, fontWeight:700}}>Kích thước</label>
-            <select value={imageConfig.size} onChange={e=>persistImageConfig({ size: e.target.value })} disabled={!desktop || imageBusy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:6}}>
-              {IMAGE_SIZES.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          </div>
-        </div>
         <div>
-          <label style={{fontSize:13, fontWeight:700}}>Thư mục lưu ảnh</label>
-          <div style={{display:'flex', gap:8, marginTop:6, flexWrap:'wrap'}}>
-            <input readOnly value={imageConfig.saveDir} placeholder="Mặc định: chỉ lưu trong thư viện media của ứng dụng" style={{flex:'1 1 280px', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', fontSize:13, background:'#f9fafb'}}/>
-            <button className="outline" onClick={chooseImageFolder} disabled={!desktop || imageBusy} style={{height:36}}>Chọn thư mục</button>
-            <button className="outline" onClick={()=>persistImageConfig({ saveDir: '' })} disabled={!desktop || imageBusy || !imageConfig.saveDir} style={{height:36}}>Bỏ chọn</button>
+          <label style={{fontSize:13, fontWeight:700}}>Style ảnh</label>
+          <div style={{display:'flex', gap:6, marginTop:6, maxWidth:560}}>
+            <select value={selectedImageStyleId} onChange={e=>handleSelectImageStyle(e.target.value)} disabled={!desktop || imageBusy || imageStyleBusy} style={{flex:1, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px'}}>
+              {imageStyles.length ? imageStyles.map(s => <option key={s.id} value={s.id}>{s.name}</option>) : <option value="">Mở app desktop để tải style ảnh</option>}
+            </select>
+            <button className="outline" onClick={openEditImageStyleModal} disabled={!desktop || imageBusy || imageStyleBusy || !selectedImageStyleId} style={{height:36}}><Pencil size={14}/> Sửa</button>
+            <button className="outline" onClick={openCreateImageStyleModal} disabled={!desktop || imageBusy || imageStyleBusy} style={{height:36}}><Plus size={14}/> Thêm</button>
           </div>
-          <div style={{fontSize:12, color:'#999', marginTop:4}}>Ảnh luôn được lưu vào thư viện media để xem trước và đăng bài; thư mục bạn chọn nhận thêm một bản sao.</div>
+          <div style={{fontSize:12, color:'#999', marginTop:4, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}>{imageStylePreview || 'Chưa có nội dung style ảnh'}</div>
         </div>
+        <div style={{fontSize:13, color:'#555'}}>Ảnh: <b>{imageProvider?.displayName || 'Theo provider AI content'}</b> • <b>{imageConfig.model.trim() || imageProvider?.defaultImageModel || 'model mặc định'}</b> • {imageConfig.size} — cấu hình trong Cài đặt → 3. AI Image.</div>
         <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
           <button className="primary" onClick={()=>generateImageFor(title, body)} disabled={!desktop || imageBusy || busy || (!title.trim() && !body.trim())} style={{height:36}}><Sparkles size={16}/> {imageBusy ? 'Đang tạo ảnh...' : (imageErr ? 'Thử tạo lại ảnh' : 'Tạo ảnh')}</button>
           <span style={{fontSize:12, color:'#999'}}>Cần có Tiêu đề hoặc Nội dung. Ảnh tối đa 10MB, định dạng PNG/JPEG/WEBP/GIF.</span>
