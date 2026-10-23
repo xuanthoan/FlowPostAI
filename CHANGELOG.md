@@ -2,6 +2,23 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-23 — Báo cáo Facebook tải theo yêu cầu
+
+### Changed
+- `src/App.jsx` — bỏ tự gọi Facebook Graph khi mở Dashboard hoặc chuyển tab; chỉ nút `Tải báo cáo` trong khung "Bài viết gần đây" mới tải Trang + 5 bài gần nhất + insights 6 metric cho 3 bài đầu.
+- `src/App.jsx` — thêm trạng thái `Chưa tải báo cáo` / `Cập nhật lúc HH:mm`, `error-box` cho lỗi token/rate limit/không có Trang/không tải được insights; giữ snapshot báo cáo trong bộ nhớ để chuyển tab không gọi lại Graph.
+- `README.md` — cập nhật hành vi báo cáo on-demand.
+- `e2e/ai.spec.ts` — test hồi quy chứng minh không có Graph call khi mount/chuyển tab, chỉ có đúng 5 call sau khi bấm nút.
+
+### Verified
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib` — 331 passed / 0 failed.
+- `npm exec -- eslint .` — exit 0.
+- `npm run build` — success.
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/ai.spec.ts e2e/providers.spec.ts` — 15 passed / 0 failed.
+
+### Notes
+- Báo cáo chỉ lấy Trang đầu tiên (`pages[0]`), tối đa 5 bài gần nhất và insights 3 bài đầu; chưa có chọn Trang/khoảng ngày/xuất CSV-PDF.
+
 ## [Unreleased] - 2026-10-23 — Cài đặt: 3 tab và chọn model AI
 
 ### Changed
