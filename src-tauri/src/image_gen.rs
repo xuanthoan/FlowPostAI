@@ -126,6 +126,26 @@ fn read_image_config<R: Runtime>(app: &AppHandle<R>) -> Result<ImageConfig, Stri
     Ok(read_image_config_at(&path))
 }
 
+/// Nếu image-config đang trỏ tới provider bị xóa, bỏ providerId + model
+/// (model của provider cũ không dùng được cho provider fallback).
+pub(crate) fn clear_image_provider_at(path: &Path, provider_id: &str) -> Result<(), String> {
+    let mut config = read_image_config_at(path);
+    if config.provider_id.as_deref() != Some(provider_id) {
+        return Ok(());
+    }
+    config.provider_id = None;
+    config.model = None;
+    write_image_config_at(path, &config)
+}
+
+pub(crate) fn clear_image_provider<R: Runtime>(
+    app: &AppHandle<R>,
+    provider_id: &str,
+) -> Result<(), String> {
+    let path = image_config_path(app)?;
+    clear_image_provider_at(&path, provider_id)
+}
+
 // --- Commands ---
 
 #[tauri::command]
@@ -889,6 +909,34 @@ mod tests {
         assert_eq!(config.save_dir, None);
         assert_eq!(config.style_id, None);
         assert_eq!(config.size, DEFAULT_IMAGE_SIZE);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn clear_image_provider_clears_matching_provider_and_model() {
+        let dir = unique_temp_dir("flowpost_image_cfg_clear_provider");
+        let path = dir.join("image-config.json");
+        let config = ImageConfig {
+            provider_id: Some("p2".into()),
+            model: Some("m".into()),
+            save_dir: Some("D".into()),
+            style_id: Some("s".into()),
+            size: "1024x1024".into(),
+        };
+        write_image_config_at(&path, &config).unwrap();
+
+        clear_image_provider_at(&path, "other").unwrap();
+        let unchanged = read_image_config_at(&path);
+        assert_eq!(unchanged.provider_id.as_deref(), Some("p2"));
+        assert_eq!(unchanged.model.as_deref(), Some("m"));
+
+        clear_image_provider_at(&path, "p2").unwrap();
+        let cleared = read_image_config_at(&path);
+        assert_eq!(cleared.provider_id, None);
+        assert_eq!(cleared.model, None);
+        assert_eq!(cleared.save_dir.as_deref(), Some("D"));
+        assert_eq!(cleared.style_id.as_deref(), Some("s"));
+        assert_eq!(cleared.size, "1024x1024");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

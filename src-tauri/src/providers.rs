@@ -578,6 +578,14 @@ pub fn set_active_provider(app: AppHandle, id: String) -> Result<ProviderPublic,
     Ok(to_public(&provider, has_api_key_for(&app, &id)))
 }
 
+/// Thêm provider mới; chỉ đặt làm active nếu đây là provider đầu tiên.
+fn register_provider(file: &mut ProvidersFile, provider: Provider) {
+    if file.providers.is_empty() {
+        file.active_provider_id = provider.id.clone();
+    }
+    file.providers.push(provider);
+}
+
 #[tauri::command]
 pub fn create_provider(app: AppHandle, payload: CreateProviderPayload) -> Result<ProviderPublic, String> {
     let id = payload.id.trim().to_lowercase();
@@ -612,8 +620,7 @@ pub fn create_provider(app: AppHandle, payload: CreateProviderPayload) -> Result
             crate::security::set_secret_hybrid(Some(&app), &api_key_name(&id), &key)?;
         }
     }
-    file.providers.push(provider.clone());
-    file.active_provider_id = provider.id.clone();
+    register_provider(&mut file, provider.clone());
     write_providers_file(&app, &file)?;
     Ok(to_public(&provider, has_api_key_for(&app, &id)))
 }
@@ -665,6 +672,8 @@ pub fn delete_provider(app: AppHandle, id: String) -> Result<(), String> {
         file.active_provider_id = file.providers[0].id.clone();
     }
     write_providers_file(&app, &file)?;
+    // Nếu provider bị xóa đang là provider tạo ảnh, bỏ chọn để ảnh quay về active provider.
+    let _ = crate::image_gen::clear_image_provider(&app, &id);
     Ok(())
 }
 
@@ -1340,5 +1349,26 @@ mod tests {
             models_for_create(DEFAULT_BASE_URL, vec!["m".to_string()]),
             vec!["m".to_string()]
         );
+    }
+
+    #[test]
+    fn create_provider_sets_active_only_for_first_provider() {
+        let mut p1 = sample_provider(vec![]);
+        p1.id = "p1".into();
+        let mut p2 = sample_provider(vec![]);
+        p2.id = "p2".into();
+
+        let mut file = ProvidersFile {
+            providers: vec![],
+            active_provider_id: String::new(),
+        };
+
+        register_provider(&mut file, p1);
+        assert_eq!(file.active_provider_id, "p1");
+        assert_eq!(file.providers.len(), 1);
+
+        register_provider(&mut file, p2);
+        assert_eq!(file.active_provider_id, "p1");
+        assert_eq!(file.providers.len(), 2);
     }
 }
