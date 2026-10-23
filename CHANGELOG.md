@@ -2,6 +2,23 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-23 — Cài đặt: 3 tab và chọn model AI
+
+### Changed
+- `src/App.jsx` — Cài đặt tách 3 tab: `Kết nối` (Facebook token), `Cài đặt Provider` (CRUD/API key/models), `Model AI` (chọn provider/model viết content và provider/model tạo ảnh, kích thước, thư mục lưu). Hai mục content/image độc lập provider.
+- `src/App.jsx` — bỏ 2 ô `Model mặc định để viết` và `Model mặc định để tạo ảnh` khỏi form provider. Model viết content lưu vào `Provider.defaultModel` qua tab `Model AI`; model ảnh lưu trong `image-config.json`.
+- `README.md` — cập nhật hướng dẫn chọn model tạo ảnh.
+- `playwright.e2e-mock.config.ts` — config chạy mock E2E không cần đặt biến môi trường thủ công.
+
+### Verified
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib` — 331 passed / 0 failed.
+- `npm exec -- eslint .` — exit 0.
+- `npm run build` — success.
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/ai.spec.ts e2e/providers.spec.ts` — 14 passed / 0 failed.
+
+### Notes
+- `defaultImageModel` cũ vẫn được backend dùng làm fallback khi `image-config.model` trống; không còn chỉnh trong form provider.
+
 ## [Unreleased] - 2026-10-23 — Sửa lỗi mất API key/token lưu im lặng
 
 ### Fixed
