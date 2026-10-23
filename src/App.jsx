@@ -397,6 +397,8 @@ function SettingsPage() {
   const [pages, setPages] = useState([])
   const [selectedPageId, setSelectedPageId] = useState('')
   const imageModelSaveTimer = useRef(null)
+  const pendingImageModelRef = useRef(null)
+  const imageModelDirtyRef = useRef(false)
 
   const activeProvider = providers.find(p => p.id === activeId) || null
   const imgProvider = providers.find(p => p.id === (imageConfig.providerId || activeId)) || null
@@ -415,18 +417,34 @@ function SettingsPage() {
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { refresh() }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => () => { if (imageModelSaveTimer.current) clearTimeout(imageModelSaveTimer.current) }, [])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => () => { flushImageModel() }, [])
 
   // Debounced so typing a model name does not hit disk on every keystroke.
-  // A pending timer must be cleared by provider changes before the config is reset.
+  // A pending edit is flushed on unmount so navigating away does not lose it.
+  function flushImageModel() {
+    if (imageModelSaveTimer.current) { clearTimeout(imageModelSaveTimer.current); imageModelSaveTimer.current = null }
+    if (!imageModelDirtyRef.current) return
+    imageModelDirtyRef.current = false
+    saveImageConfig({ model: pendingImageModelRef.current ?? '' })
+  }
+
   const handleImageModelChange = (v) => {
     setImageConfig(c => ({ ...c, model: v }))
+    pendingImageModelRef.current = v
+    imageModelDirtyRef.current = true
     if (imageModelSaveTimer.current) clearTimeout(imageModelSaveTimer.current)
-    imageModelSaveTimer.current = setTimeout(() => { saveImageConfig({ model: v }) }, 600)
+    imageModelSaveTimer.current = setTimeout(() => {
+      imageModelSaveTimer.current = null
+      imageModelDirtyRef.current = false
+      saveImageConfig({ model: v })
+    }, 600)
   }
 
   const handleImageProviderChange = async (value) => {
     if (imageModelSaveTimer.current) { clearTimeout(imageModelSaveTimer.current); imageModelSaveTimer.current = null }
+    imageModelDirtyRef.current = false
+    pendingImageModelRef.current = null
     await saveImageConfig({ providerId: value, model: '' })
   }
 
@@ -501,7 +519,7 @@ function SettingsPage() {
       </div>
       <div>
         <label style={{fontSize:13, fontWeight:700}}>Model tạo ảnh</label>
-        <div style={{marginTop:6, maxWidth:460}}>
+        <div style={{marginTop:6, maxWidth:460}} onBlur={flushImageModel}>
           <SuggestInput ariaLabel="Model tạo ảnh" placeholder={imgProvider?.defaultImageModel ? `Mặc định: ${imgProvider.defaultImageModel}` : 'Mặc định của provider'} value={imageConfig.model} options={distinctSortedLabels([...(imgProvider?.models||[]), imgProvider?.defaultImageModel||''])} onChange={handleImageModelChange}/>
         </div>
       </div>

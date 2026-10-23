@@ -7,8 +7,12 @@ const BASE_URL = process.env.E2E_BASE_URL || 'http://127.0.0.1:20128/v1';
 const mockImplCode = `
 window.__TAURI_MOCK__ = true;
 window.__TAURI_INTERNALS__ = { invoke: (cmd, args) => window.__TAURI_MOCK_IMPL__(cmd, args), convertFileSrc: (p) => 'asset://localhost/' + encodeURIComponent(p) };
+window.__IMAGE_CONFIG__ = { providerId: 'p1', model: 'img-model', saveDir: '', styleId: 'cinematic', size: '1024x1024' };
+window.__ACTIVE_CALLS__ = [];
 window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
   const baseUrl = ${JSON.stringify(BASE_URL)};
+  const p1 = { id: 'p1', displayName: 'P1', baseUrl, protocol: 'openai-completions', models: ['aihorde/2DN', 'text-model'], defaultModel: 'text-model', defaultImageModel: 'img-model', hasApiKey: true };
+  const p2 = { id: 'p2', displayName: 'P2 Image', baseUrl, protocol: 'openai-completions', models: ['text-model-2'], defaultModel: 'text-model-2', defaultImageModel: 'img-2-model', hasApiKey: true };
   if (cmd === 'generate_content') {
     const payload = args?.payload;
     window.__LAST_GENERATE_PAYLOAD__ = payload ?? null;
@@ -48,15 +52,7 @@ window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
     };
   }
   if (cmd === 'get_active_provider') {
-    return {
-      id: 'p1',
-      displayName: 'P1',
-      baseUrl: 'http://127.0.0.1:20128/v1',
-      protocol: 'openai-completions',
-      models: ['aihorde/2DN', 'text-model'],
-      defaultModel: 'text-model',
-      hasApiKey: true,
-    };
+    return p1;
   }
   if (cmd === 'list_image_styles') {
     return [
@@ -66,11 +62,12 @@ window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
     ];
   }
   if (cmd === 'get_image_config') {
-    return { providerId: 'p1', model: 'img-model', saveDir: '', styleId: 'cinematic', size: '1024x1024' };
+    return { ...window.__IMAGE_CONFIG__ };
   }
   if (cmd === 'set_image_config') {
     window.__LAST_IMAGE_CONFIG__ = args?.config ?? null;
-    return args?.config ?? {};
+    window.__IMAGE_CONFIG__ = { ...window.__IMAGE_CONFIG__, ...(args?.config || {}) };
+    return { ...window.__IMAGE_CONFIG__ };
   }
   if (cmd === 'pick_image_folder') return 'C:\\\\tmp\\\\flowpost';
   if (cmd === 'generate_image') {
@@ -85,8 +82,15 @@ window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
   }
   if (cmd === 'list_media') return [];
   if (cmd === 'list_providers') {
-    return [{ id: 'p1', displayName: 'P1', baseUrl: 'http://127.0.0.1:20128/v1', protocol: 'openai-completions', models: ['text-model'], defaultModel: 'text-model', defaultImageModel: 'img-model', hasApiKey: true }];
+    return [p1, p2];
   }
+  if (cmd === 'set_active_provider') {
+    if (!window.__ACTIVE_CALLS__) window.__ACTIVE_CALLS__ = [];
+    window.__ACTIVE_CALLS__.push(args?.id);
+    return { ...p1, id: args?.id };
+  }
+  if (cmd === 'credential_status') return { hasFacebookToken: false, hasAiProviderKey: true };
+  if (cmd === 'get_scheduler_config') return { selectedPageId: '' };
   throw new Error('Unknown mock command: ' + cmd);
 };
 `;
@@ -160,10 +164,12 @@ test.describe('AI generate_content E2E (real server)', () => {
   });
 
   test('AI Content generates an image when the checkbox is enabled', async ({ page }) => {
+    await page.getByRole('button', { name: 'Cài đặt', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '3. AI Image' })).toBeVisible();
+    await page.getByLabel('Model tạo ảnh', { exact: true }).fill('img-2');
+    await expect.poll(() => page.evaluate(() => (window as any).__LAST_IMAGE_CONFIG__?.model)).toBe('img-2');
     await page.getByRole('button', { name: 'AI Content', exact: true }).click();
     await page.getByLabel('Tạo ảnh minh hoạ bằng AI').check();
-    await page.getByLabel('Model tạo ảnh', { exact: true }).fill('img-2');
-    await expect.poll(async () => page.evaluate(() => (window as any).__LAST_IMAGE_CONFIG__?.model)).toBe('img-2');
     await page.getByPlaceholder('VD: Bí quyết năng lượng buổi sáng cho dân văn phòng...').fill('Bí quyết năng lượng buổi sáng');
     await page.getByRole('button', { name: 'Tạo nội dung', exact: true }).click();
     await expect(page.getByText('Đã tạo ảnh minh hoạ')).toBeVisible();
@@ -175,6 +181,30 @@ test.describe('AI generate_content E2E (real server)', () => {
     expect(imgPayload.model).toBe('img-2');
     await expect(page.getByText('Đã gắn vào bài viết')).toBeVisible();
     await expect(page.getByText('Gắn media (1)')).toBeVisible();
+  });
+
+  test('Settings has 3 blocks and image provider is independent from content provider', async ({ page }) => {
+    await page.getByRole('button', { name: 'Cài đặt', exact: true }).click();
+    await expect(page.getByRole('heading', { name: '1. Providers' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '2. AI Content' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: '3. AI Image' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Kết nối Facebook' })).toBeVisible();
+
+    await expect(page.getByLabel('Provider tạo ảnh')).toHaveValue('p1');
+    await page.getByLabel('Provider tạo ảnh').selectOption('p2');
+    await expect.poll(() => page.evaluate(() => (window as any).__LAST_IMAGE_CONFIG__?.providerId)).toBe('p2');
+    const savedConfig: any = await page.evaluate(() => (window as any).__LAST_IMAGE_CONFIG__);
+    expect(savedConfig.model).toBe('');
+    const activeCalls: any[] = await page.evaluate(() => (window as any).__ACTIVE_CALLS__);
+    expect(activeCalls).toEqual([]);
+
+    await page.getByLabel('Provider nội dung').selectOption('p2');
+    await expect.poll(() => page.evaluate(() => {
+      const calls = (window as any).__ACTIVE_CALLS__ || [];
+      return calls[calls.length - 1];
+    })).toBe('p2');
+    const imgConfig: any = await page.evaluate(() => (window as any).__IMAGE_CONFIG__);
+    expect(imgConfig.providerId).toBe('p2');
   });
 
   test('AI Content keeps the text when image generation fails', async ({ page }) => {
