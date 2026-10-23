@@ -2014,9 +2014,10 @@ function App() {
   const [styleList, setStyleList] = useState([])
   const [hoveredRecent, setHoveredRecent] = useState(null)
   const [graphLoading, setGraphLoading] = useState(false)
+  const [graphErr, setGraphErr] = useState('')
   const [lastInsightsAt, setLastInsightsAt] = useState(null)
   const graphLoadingRef = useRef(false)
-  // Ảnh chụp insights đã tải thủ công (chỉ trong bộ nhớ) để loadLocal/loadGraph(false) không xóa mất.
+  // Ảnh chụp insights đã tải thủ công (chỉ trong bộ nhớ) để loadLocal không xóa mất.
   const graphSnapshotRef = useRef(null)
   const desktop = isDesktop()
   const today = new Intl.DateTimeFormat('vi-VN', { weekday: 'long', day: '2-digit', month: 'long' }).format(new Date())
@@ -2052,9 +2053,11 @@ function App() {
         setDashboardTotalInteractions(snapshot.totals.interactions)
         setDashboardTotalSub(snapshot.totals.sub)
         setDashboardEngagementRate(snapshot.engagementRate)
+        setLastInsightsAt(snapshot.lastInsightsAt ?? null)
       } else {
         setDashboardRecent(recent)
         setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights'); setDashboardEngagementRate('—')
+        setLastInsightsAt(null)
       }
       // Stats
       const now = new Date()
@@ -2076,86 +2079,98 @@ function App() {
     } catch { /* ignore - keep previous */ }
   }
 
-  const loadGraph = async (withInsights) => {
+  const loadGraph = async () => {
     if (!desktop || graphLoadingRef.current) return
     graphLoadingRef.current = true
     setGraphLoading(true)
+    setGraphErr('')
     try {
       const pages = await invokeDesktop('list_facebook_pages', { token: '' })
-      if (pages.length) {
-        const pageId = pages[0].id
-        const postsRes = await invokeDesktop('list_page_posts', { pageId, limit: 5 })
-        const fbPosts = postsRes?.data || (Array.isArray(postsRes) ? postsRes : [])
-        if (Array.isArray(fbPosts) && fbPosts.length) {
-          const getVal = (data, name) => {
-            const m = (data || []).find(x => x.name === name)
-            if (!m) return '—'
-            const v = m.values?.[0]?.value
-            if (v == null) return '—'
-            if (typeof v === 'object') return JSON.stringify(v)
-            return String(v)
-          }
-          let insightsFetched = 0
-          const enriched = await Promise.all(fbPosts.slice(0,3).map(async (fp, idx) => {
-            try {
-              let data = []
-              if (withInsights === true) {
-                const ins = await invokeDesktop('get_post_insights', { postId: fp.id })
-                data = ins?.data || []
-                insightsFetched += 1
-              }
-              const msg = fp.message ? fp.message.slice(0,40) : fp.id
-              return {
-                title: msg, page: pages[0].name, date: new Date(fp.created_time).toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}),
-                type: fp.full_picture ? 'Ảnh + văn bản' : 'Văn bản', status: 'Đã đăng', color: ['#f0a86e','#7469d5','#4b9b7d'][idx%3], initials: pages[0].name.slice(0,2).toUpperCase(),
-                reach: getVal(data, 'post_impressions_unique'), likes: getVal(data, 'post_reactions_by_type_total'), comments: getVal(data, 'post_clicks'), pending: false,
-                tooltip: `Impressions: ${getVal(data,'post_impressions')} | Unique: ${getVal(data,'post_impressions_unique')} | Engaged: ${getVal(data,'post_engaged_users')} | Clicks: ${getVal(data,'post_clicks')} | Reactions: ${getVal(data,'post_reactions_by_type_total')} | VideoViews: ${getVal(data,'post_video_views')}`,
-                tooltipData: { impressions: getVal(data,'post_impressions'), unique: getVal(data,'post_impressions_unique'), engaged: getVal(data,'post_engaged_users'), clicks: getVal(data,'post_clicks'), reactions: getVal(data,'post_reactions_by_type_total'), videoViews: getVal(data,'post_video_views') }
-              }
-            } catch { return null }
-          }))
-          const filtered = enriched.filter(Boolean)
-          const previousSnapshot = graphSnapshotRef.current
-          if (filtered.length && withInsights === true && insightsFetched > 0) {
-            // Tính tổng tương tác và tỷ lệ từ insights
-            let total = 0
-            let totalUnique = 0
-            for (const r of filtered) {
-              const d = r.tooltipData
-              if (!d) continue
-              const engaged = Number(String(d.engaged).replace(/[^0-9.-]/g,'')) || 0
-              const clicks = Number(String(d.clicks).replace(/[^0-9.-]/g,'')) || 0
-              let reactionsNum = 0
-              try { const obj = JSON.parse(d.reactions); if (typeof obj === 'object' && obj !== null) reactionsNum = Object.values(obj).reduce((s,v)=> s + (Number(v)||0),0); else reactionsNum = Number(d.reactions)||0 } catch { reactionsNum = Number(String(d.reactions).replace(/[^0-9.-]/g,''))||0 }
-              total += engaged + clicks + reactionsNum
-              const unique = Number(String(d.unique).replace(/[^0-9.-]/g,'')) || 0
-              totalUnique += unique
-            }
-            const snapshot = {
-              recent: filtered,
-              totals: {
-                interactions: total ? String(total) : '—',
-                sub: total ? `${filtered.length} bài có insights` : 'chờ Graph insights'
-              },
-              engagementRate: total && totalUnique ? `${((total/totalUnique)*100).toFixed(1)}%` : '—',
-              lastInsightsAt: Date.now()
-            }
-            graphSnapshotRef.current = snapshot
-            setDashboardRecent(snapshot.recent)
-            setDashboardTotalInteractions(snapshot.totals.interactions)
-            setDashboardTotalSub(snapshot.totals.sub)
-            setDashboardEngagementRate(snapshot.engagementRate)
-            setLastInsightsAt(snapshot.lastInsightsAt)
-          } else if (!previousSnapshot && filtered.length) {
-            // Chưa từng tải insights: hiển thị bài viết Graph với số liệu tạm.
-            setDashboardRecent(filtered)
-            setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights'); setDashboardEngagementRate('—')
-          } else if (!previousSnapshot) {
-            setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights'); setDashboardEngagementRate('—')
-          }
-        }
+      if (!pages.length) {
+        setGraphErr('Chưa có Trang Facebook. Vào Cài đặt → Kết nối → Tải Trang.')
+        return
       }
-    } catch { /* không có token read_insights thì giữ '—' */ } finally {
+      const pageId = pages[0].id
+      const postsRes = await invokeDesktop('list_page_posts', { pageId, limit: 5 })
+      const fbPosts = postsRes?.data || (Array.isArray(postsRes) ? postsRes : [])
+      if (!Array.isArray(fbPosts) || !fbPosts.length) {
+        setDashboardRecent([])
+        setDashboardTotalInteractions('—')
+        setDashboardTotalSub('Trang chưa có bài viết')
+        setDashboardEngagementRate('—')
+        setLastInsightsAt(Date.now())
+        return
+      }
+      const getVal = (data, name) => {
+        const m = (data || []).find(x => x.name === name)
+        if (!m) return '—'
+        const v = m.values?.[0]?.value
+        if (v == null) return '—'
+        if (typeof v === 'object') return JSON.stringify(v)
+        return String(v)
+      }
+      let insightsFetched = 0
+      const enriched = await Promise.all(fbPosts.slice(0,3).map(async (fp, idx) => {
+        try {
+          const ins = await invokeDesktop('get_post_insights', { postId: fp.id })
+          const data = ins?.data || []
+          insightsFetched += 1
+          const msg = fp.message ? fp.message.slice(0,40) : fp.id
+          return {
+            title: msg, page: pages[0].name, date: new Date(fp.created_time).toLocaleDateString('vi-VN', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}),
+            type: fp.full_picture ? 'Ảnh + văn bản' : 'Văn bản', status: 'Đã đăng', color: ['#f0a86e','#7469d5','#4b9b7d'][idx%3], initials: pages[0].name.slice(0,2).toUpperCase(),
+            reach: getVal(data, 'post_impressions_unique'), likes: getVal(data, 'post_reactions_by_type_total'), comments: getVal(data, 'post_clicks'), pending: false,
+            tooltip: `Impressions: ${getVal(data,'post_impressions')} | Unique: ${getVal(data,'post_impressions_unique')} | Engaged: ${getVal(data,'post_engaged_users')} | Clicks: ${getVal(data,'post_clicks')} | Reactions: ${getVal(data,'post_reactions_by_type_total')} | VideoViews: ${getVal(data,'post_video_views')}`,
+            tooltipData: { impressions: getVal(data,'post_impressions'), unique: getVal(data,'post_impressions_unique'), engaged: getVal(data,'post_engaged_users'), clicks: getVal(data,'post_clicks'), reactions: getVal(data,'post_reactions_by_type_total'), videoViews: getVal(data,'post_video_views') }
+          }
+        } catch { return null }
+      }))
+      const filtered = enriched.filter(Boolean)
+      const previousSnapshot = graphSnapshotRef.current
+      if (filtered.length && insightsFetched > 0) {
+        // Tính tổng tương tác và tỷ lệ từ insights
+        let total = 0
+        let totalUnique = 0
+        for (const r of filtered) {
+          const d = r.tooltipData
+          if (!d) continue
+          const engaged = Number(String(d.engaged).replace(/[^0-9.-]/g,'')) || 0
+          const clicks = Number(String(d.clicks).replace(/[^0-9.-]/g,'')) || 0
+          let reactionsNum = 0
+          try { const obj = JSON.parse(d.reactions); if (typeof obj === 'object' && obj !== null) reactionsNum = Object.values(obj).reduce((s,v)=> s + (Number(v)||0),0); else reactionsNum = Number(d.reactions)||0 } catch { reactionsNum = Number(String(d.reactions).replace(/[^0-9.-]/g,''))||0 }
+          total += engaged + clicks + reactionsNum
+          const unique = Number(String(d.unique).replace(/[^0-9.-]/g,'')) || 0
+          totalUnique += unique
+        }
+        const snapshot = {
+          recent: filtered,
+          totals: {
+            interactions: total ? String(total) : '—',
+            sub: total ? `${filtered.length} bài có insights` : 'chờ Graph insights'
+          },
+          engagementRate: total && totalUnique ? `${((total/totalUnique)*100).toFixed(1)}%` : '—',
+          lastInsightsAt: Date.now()
+        }
+        graphSnapshotRef.current = snapshot
+        setDashboardRecent(snapshot.recent)
+        setDashboardTotalInteractions(snapshot.totals.interactions)
+        setDashboardTotalSub(snapshot.totals.sub)
+        setDashboardEngagementRate(snapshot.engagementRate)
+        setLastInsightsAt(snapshot.lastInsightsAt)
+      } else if (!previousSnapshot && filtered.length) {
+        // Chưa từng tải insights: hiển thị bài viết Graph với số liệu tạm.
+        setDashboardRecent(filtered)
+        setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights'); setDashboardEngagementRate('—')
+        setLastInsightsAt(Date.now())
+      } else if (!previousSnapshot) {
+        setDashboardTotalInteractions('—'); setDashboardTotalSub('chờ Graph insights'); setDashboardEngagementRate('—')
+      }
+      if (!filtered.length) {
+        setGraphErr('Không tải được insights cho bài viết. Kiểm tra quyền read_insights hoặc thử lại sau.')
+      }
+    } catch (e) {
+      setGraphErr(String(e?.message || e))
+    } finally {
       graphLoadingRef.current = false
       setGraphLoading(false)
     }
@@ -2164,7 +2179,7 @@ function App() {
   useEffect(() => {
     if (!desktop) return
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadLocal().then(() => loadGraph(false))
+    loadLocal()
   }, [desktop, active, styleList]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useVisiblePolling(loadLocal, 0, Boolean(desktop))
@@ -2203,7 +2218,8 @@ function App() {
         </section>
 
         <section className="panel recent">
-          <div className="panel-head"><div><h2>Bài viết gần đây</h2><p>Theo dõi trạng thái và hiệu quả bài đăng</p></div><div style={{display:'flex', alignItems:'center', gap:10}}>{lastInsightsAt && <span style={{fontSize:11, color:'#9e9ca5'}}>Cập nhật lúc {new Date(lastInsightsAt).toLocaleTimeString('vi-VN', { hour:'2-digit', minute:'2-digit' })}</span>}<button className="outline" style={{height:30}} onClick={() => loadGraph(true)} disabled={graphLoading}>{graphLoading ? 'Đang tải...' : 'Làm mới'}</button><button className="text-link">Xem tất cả <span>→</span></button></div></div>
+          <div className="panel-head"><div><h2>Bài viết gần đây</h2><p>Theo dõi trạng thái và hiệu quả bài đăng</p></div><div style={{display:'flex', alignItems:'center', gap:10}}>{lastInsightsAt ? <span style={{fontSize:11, color:'#9e9ca5'}}>Cập nhật lúc {new Date(lastInsightsAt).toLocaleTimeString('vi-VN', { hour:'2-digit', minute:'2-digit' })}</span> : <span style={{fontSize:11, color:'#9e9ca5'}}>Chưa tải báo cáo</span>}<button className="outline" style={{height:30}} onClick={loadGraph} disabled={graphLoading}><RefreshCw size={14}/> {graphLoading ? 'Đang tải...' : 'Tải báo cáo'}</button><button className="text-link">Xem tất cả <span>→</span></button></div></div>
+          {graphErr && <div className="error-box" style={{marginTop:8}}>{graphErr}</div>}
           <div className="table-wrap"><table><thead><tr><th>NỘI DUNG</th><th>TRANG</th><th>THỜI GIAN</th><th>LOẠI</th><th>TRẠNG THÁI</th><th>TIẾP CẬN</th><th>TƯƠNG TÁC</th><th></th></tr></thead><tbody>{dashboardRecent.length ? dashboardRecent.map((p, i) => <tr key={p.title + i} onMouseEnter={()=>setHoveredRecent(i)} onMouseLeave={()=>setHoveredRecent(null)} style={{position:'relative'}}><td><div className="post-title"><div className={`thumb thumb${i+1}`}>{i === 0 ? '☀️' : i === 1 ? '“' : '▶'}</div><strong>{p.title}</strong></div></td><td><div className="page"><i style={{background:p.color}}>{p.initials}</i>{p.page}</div></td><td>{p.date}</td><td><span className="type">{p.type}</span></td><td><span className={p.pending ? 'status pending' : 'status success'}>{p.pending ? <Clock3 size={13}/> : <CircleCheck size={13}/>} {p.pending ? 'Đang xử lý' : p.status}</span></td><td style={{position:'relative'}}><strong>{p.reach}</strong>{hoveredRecent===i && p.tooltipData && p.tooltipData.impressions!=='—' && <div style={{position:'absolute', top:'100%', left:0, background:'#fff', border:'1px solid #e9e9ee', borderRadius:8, boxShadow:'0 8px 24px #2222', padding:10, zIndex:10, minWidth:240}}><div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 12px', fontSize:13}}><span style={{color:'#777'}}>Impressions</span><b>{p.tooltipData.impressions}</b><span style={{color:'#777'}}>Unique</span><b>{p.tooltipData.unique}</b><span style={{color:'#777'}}>Engaged</span><b>{p.tooltipData.engaged}</b><span style={{color:'#777'}}>Clicks</span><b>{p.tooltipData.clicks}</b><span style={{color:'#777'}}>Reactions</span><b style={{wordBreak:'break-all'}}>{p.tooltipData.reactions}</b><span style={{color:'#777'}}>VideoViews</span><b>{p.tooltipData.videoViews}</b></div></div>}</td><td style={{position:'relative'}}><div className="engage"><span><Heart size={14}/> {p.likes || '—'}</span><span><MessageCircle size={14}/> {p.comments || '—'}</span></div>{hoveredRecent===i && p.tooltipData && p.tooltipData.impressions!=='—' && <div style={{position:'absolute', top:'100%', right:0, background:'#fff', border:'1px solid #e9e9ee', borderRadius:8, boxShadow:'0 8px 24px #2222', padding:10, zIndex:10, minWidth:240}}><div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 12px', fontSize:13}}><span style={{color:'#777'}}>Impressions</span><b>{p.tooltipData.impressions}</b><span style={{color:'#777'}}>Unique</span><b>{p.tooltipData.unique}</b><span style={{color:'#777'}}>Engaged</span><b>{p.tooltipData.engaged}</b><span style={{color:'#777'}}>Clicks</span><b>{p.tooltipData.clicks}</b><span style={{color:'#777'}}>Reactions</span><b style={{wordBreak:'break-all'}}>{p.tooltipData.reactions}</b><span style={{color:'#777'}}>VideoViews</span><b>{p.tooltipData.videoViews}</b></div></div>}</td><td><button className="row-more" aria-label="Thao tác"><MoreHorizontal size={18}/></button></td></tr>) : <tr><td colSpan={8} style={{textAlign:'center', padding:20, color:'#777', fontSize:14}}>Chưa có bài viết — hãy tạo nội dung ở AI Content</td></tr>}</tbody></table></div>
         </section>
         </>}

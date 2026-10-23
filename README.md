@@ -53,14 +53,14 @@ FlowPost AI dùng token do bạn tự tạo và dán vào ứng dụng. Token c�
 1. Mở https://developers.facebook.com/tools/explorer/ → chọn App của bạn → `User Token` → `Add a Permission` tick 5 scopes trên → `Generate Access Token` → Copy. Token tạo ở Graph Explorer chỉ nên dùng để kiểm thử (xem mục production bên dưới).
 2. Mở FlowPost AI → `Cài đặt` → `Kết nối` → dán vào `Nhập Facebook User/Page Access Token` → `Lưu` → `Kiểm tra` phải hiện `Token hợp lệ` (`GET /me`, `facebook.rs:validate_facebook_token`).
 3. Bấm `Tải Trang` → backend gọi `GET /me/accounts?fields=id,name,access_token`, đổi User Token thành Page Token và lưu `fb_page_{id}`; frontend chỉ thấy `id/name` (`facebook.rs:list_facebook_pages`).
-4. Chọn `Trang mặc định cho Lịch`. Danh sách Trang và bài viết gần đây được tải khi mở tab Dashboard hoặc khi chuyển tab; insights 6 metric chỉ được tải khi bạn bấm `Làm mới` trong khung "Bài viết gần đây". Hover `TIẾP CẬN` hiện bảng 2 cột; nếu thiếu `read_insights` thì `reach` giữ `—`.
+4. Chọn `Trang mặc định cho Lịch`. Danh sách Trang + 5 bài gần nhất + insights 6 metric (3 bài đầu) **chỉ được tải khi bạn bấm `Tải báo cáo`** trong khung "Bài viết gần đây". Chuyển tab, mở Dashboard hoặc quay lại cửa sổ không gọi Graph. Hover `TIẾP CẬN` hiện bảng 2 cột; nếu thiếu `read_insights` thì `reach` giữ `—`.
 
 > Lưu ý lưu trữ: bản build này chưa bật backend keyring của hệ điều hành, nên secret được lưu trong `secure-credentials.json` (plaintext) tại `app_data_dir`. Cơ chế ghi keyring vẫn tồn tại và chỉ xóa bản fallback sau khi **đọc lại được** giá trị vừa ghi; giá trị cũ vẫn được đọc để migrate. Chi tiết và giới hạn: xem `SECURITY.md`.
 
 ### Thay đổi hành vi gần đây
 
-- Dashboard không còn tự gọi Graph API mỗi 4 giây; danh sách Trang và bài viết gần đây được tải khi mở/đổi tab, còn insights chỉ được tải khi người dùng bấm Làm mới. Khi mở app lần đầu, danh sách Trang và bài viết có thể được tải hai lần (một lần khi mount, một lần khi danh sách style tải xong).
-- Chi tiết: danh sách Trang + bài viết gần đây tải khi mở tab hoặc đổi tab; insights chỉ tải khi bấm `Làm mới`.
+- Dashboard không gọi Graph khi mở/đổi tab; mọi request báo cáo chỉ chạy khi bấm Tải báo cáo.
+- Chi tiết: nút Tải báo cáo tải danh sách Trang + bài viết gần đây + insights; dữ liệu giữ trong bộ nhớ đến khi tải lại. Số liệu "Bài viết tháng này"/"Đã đăng thành công" vẫn lấy từ dữ liệu cục bộ, không gọi Graph.
 - Token trang được lưu lại chỉ khi giá trị thay đổi.
 - Mọi request Graph dùng Authorization: Bearer; token không còn nằm trong URL, form hoặc multipart.
 - Lỗi mạng và body lỗi không phải JSON được scrub URL/token trước khi trả về frontend; lỗi Graph dạng JSON trả nguyên `message` của Meta.
