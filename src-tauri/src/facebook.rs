@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use tauri::{AppHandle, Runtime};
@@ -18,6 +19,10 @@ pub(crate) const ALLOWED_IMAGE_MIMES: [&str; 4] =
     ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const PHOTO_UPLOAD_TIMEOUT_SECS: u64 = 30;
 const FEED_TIMEOUT_SECS: u64 = 30;
+pub const REPORT_PAGE_LIMIT: u32 = 100;
+pub const REPORT_MAX_PAGES: usize = 20;
+const REPORT_FIELDS: &str =
+    "id,message,created_time,permalink_url,likes.summary(true),comments.summary(true),shares";
 
 /// One shared HTTP client for every Graph request. Rebuilding a client per
 /// request discarded the connection pool and kept six copies of the same
@@ -45,6 +50,36 @@ pub struct MeResponse {
 pub struct PageInfo {
     pub id: String,
     pub name: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportPost {
+    pub id: String,
+    pub message: Option<String>,
+    pub created_time: Option<String>,
+    pub permalink_url: Option<String>,
+    pub reactions: u32,
+    pub comments: u32,
+    pub shares: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PageReport {
+    pub page_id: String,
+    pub page_name: Option<String>,
+    pub days: u32,
+    pub since: i64,
+    pub until: i64,
+    pub post_count: usize,
+    pub total_reactions: u64,
+    pub total_comments: u64,
+    pub total_shares: u64,
+    pub total_interactions: u64,
+    pub partial: bool,
+    pub truncated: bool,
+    pub posts: Vec<ReportPost>,
 }
 
 /// Internal shape of a `/me/accounts` entry. The page token is cached into the
@@ -781,6 +816,243 @@ pub async fn list_page_posts<R: Runtime>(app: AppHandle<R>, page_id: String, lim
     .map_err(|e| e.to_string())
 }
 
+/// Cửa sổ thời gian cuốn theo ngày cho báo cáo. Chỉ chấp nhận 7 hoặc 30 ngày.
+fn report_window(now: DateTime<Utc>, days: u32) -> Result<(i64, i64), String> {
+    if days != 7 && days != 30 {
+        return Err("Khoảng thời gian chỉ hỗ trợ 7 hoặc 30 ngày.".to_string());
+    }
+    let until = now.timestamp();
+    Ok((until - i64::from(days) * 86_400, until))
+}
+
+/// Tên Trang chỉ để hiển thị/ghi CSV: bỏ ký tự điều khiển và giới hạn 200 ký tự.
+fn normalize_report_page_name(page_name: Option<String>) -> Option<String> {
+    let cleaned = page_name?
+        .chars()
+        .filter(|c| !c.is_control())
+        .collect::<String>()
+        .trim()
+        .chars()
+        .take(200)
+        .collect::<String>();
+    if cleaned.is_empty() {
+        None
+    } else {
+        Some(cleaned)
+    }
+}
+
+fn report_summary_total(raw: &serde_json::Value, key: &str) -> Option<u64> {
+    raw.get(key)?
+        .get("summary")?
+        .get("total_count")?
+        .as_u64()
+}
+
+/// Đọc một trang `/{page_id}/posts`. Bài thiếu id bị bỏ qua; summary thiếu
+/// total_count trả 0 và đánh dấu partial (shares thiếu là bình thường).
+fn parse_report_posts(
+    value: &serde_json::Value,
+) -> Result<(Vec<ReportPost>, bool), GraphFailure> {
+    let data = value
+        .get("data")
+        .and_then(|data| data.as_array())
+        .ok_or_else(|| {
+            GraphFailure::local(
+                GraphFailureKind::Other,
+                "Phản hồi Graph API không hợp lệ".to_string(),
+            )
+        })?;
+    let mut posts = Vec::with_capacity(data.len());
+    let mut partial = false;
+    for raw in data {
+        let Some(id) = raw
+            .get("id")
+            .and_then(|id| id.as_str())
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        else {
+            continue;
+        };
+        let likes = report_summary_total(raw, "likes");
+        let comments = report_summary_total(raw, "comments");
+        if likes.is_none() || comments.is_none() {
+            partial = true;
+        }
+        let shares = raw
+            .get("shares")
+            .and_then(|shares| shares.get("count"))
+            .and_then(|count| count.as_u64())
+            .unwrap_or(0);
+        let to_u32 = |value: u64| value.min(u32::MAX as u64) as u32;
+        posts.push(ReportPost {
+            id: id.to_string(),
+            message: raw
+                .get("message")
+                .and_then(|message| message.as_str())
+                .map(str::to_string),
+            created_time: raw
+                .get("created_time")
+                .and_then(|time| time.as_str())
+                .map(str::to_string),
+            permalink_url: raw
+                .get("permalink_url")
+                .and_then(|url| url.as_str())
+                .map(str::to_string),
+            reactions: to_u32(likes.unwrap_or(0)),
+            comments: to_u32(comments.unwrap_or(0)),
+            shares: to_u32(shares),
+        });
+    }
+    Ok((posts, partial))
+}
+
+/// Chỉ theo cursor `paging.cursors.after`; không bao giờ dùng `paging.next`.
+fn report_cursor(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("paging")?
+        .get("cursors")?
+        .get("after")?
+        .as_str()
+        .map(str::trim)
+        .filter(|cursor| !cursor.is_empty())
+        .map(str::to_string)
+}
+
+fn report_error_message(failure: &GraphFailure) -> String {
+    match failure.kind {
+        GraphFailureKind::TokenInvalid => {
+            "Token không hợp lệ hoặc đã hết hạn. Vào Cài đặt → Kết nối để cập nhật token, rồi Tải Trang lại.".to_string()
+        }
+        GraphFailureKind::RateLimited => match failure.retry_after_secs {
+            Some(seconds) => format!(
+                "Facebook đang giới hạn tần suất. Thử lại sau {} giây.",
+                seconds
+            ),
+            None => "Facebook đang giới hạn tần suất. Thử lại sau ít phút.".to_string(),
+        },
+        GraphFailureKind::InvalidParam => format!(
+            "Không tải được báo cáo: {}",
+            scrub_error_text(&failure.message)
+        ),
+        GraphFailureKind::Network => {
+            "Không thể kết nối Facebook. Kiểm tra mạng rồi thử lại.".to_string()
+        }
+        GraphFailureKind::Other => format!(
+            "Không tải được báo cáo: {}",
+            scrub_error_text(&failure.message)
+        ),
+    }
+}
+
+async fn report_with(
+    base: &str,
+    token: &str,
+    page_id: &str,
+    page_name: Option<String>,
+    days: u32,
+    max_pages: usize,
+) -> Result<PageReport, GraphFailure> {
+    validate_page_id(page_id)
+        .map_err(|e| GraphFailure::local(GraphFailureKind::InvalidParam, e))?;
+    let (since, until) = report_window(Utc::now(), days)
+        .map_err(|e| GraphFailure::local(GraphFailureKind::InvalidParam, e))?;
+    let page_id = page_id.trim().to_string();
+    let page_name = normalize_report_page_name(page_name);
+
+    let mut posts = Vec::new();
+    let mut partial = false;
+    let mut truncated = false;
+    let mut after: Option<String> = None;
+    let mut requests = 0usize;
+
+    loop {
+        if requests >= max_pages {
+            truncated = after.is_some();
+            break;
+        }
+        requests += 1;
+        let mut params = vec![
+            ("fields", REPORT_FIELDS.to_string()),
+            ("limit", REPORT_PAGE_LIMIT.to_string()),
+            ("since", since.to_string()),
+            ("until", until.to_string()),
+        ];
+        if let Some(cursor) = after.as_deref() {
+            params.push(("after", cursor.to_string()));
+        }
+        let resp = graph_client()
+            .get(format!("{}/{}/posts", base, page_id))
+            .query(&params)
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(network_failure)?;
+        let status = resp.status().as_u16();
+        let headers = resp.headers().clone();
+        let body = resp.text().await.map_err(body_read_failure)?;
+        if !(200..300).contains(&status) {
+            return Err(graph_failure_from_response(status, &headers, &body));
+        }
+        let value = parse_json_response(&body)?;
+        let (mut page_posts, page_partial) = parse_report_posts(&value)?;
+        posts.append(&mut page_posts);
+        partial |= page_partial;
+        let Some(next_cursor) = report_cursor(&value) else {
+            break;
+        };
+        if after.as_deref() == Some(next_cursor.as_str()) {
+            truncated = true;
+            break;
+        }
+        after = Some(next_cursor);
+    }
+
+    let total_reactions: u64 = posts.iter().map(|post| u64::from(post.reactions)).sum();
+    let total_comments: u64 = posts.iter().map(|post| u64::from(post.comments)).sum();
+    let total_shares: u64 = posts.iter().map(|post| u64::from(post.shares)).sum();
+    Ok(PageReport {
+        page_id,
+        page_name,
+        days,
+        since,
+        until,
+        post_count: posts.len(),
+        total_reactions,
+        total_comments,
+        total_shares,
+        total_interactions: total_reactions + total_comments + total_shares,
+        partial,
+        truncated,
+        posts,
+    })
+}
+
+#[tauri::command]
+pub async fn get_page_report<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    page_name: Option<String>,
+    days: u32,
+) -> Result<PageReport, String> {
+    validate_page_id(&page_id)?;
+    report_window(Utc::now(), days)?;
+    let access_token = resolve_token_for_page(&app, page_id.trim())?;
+    if access_token.trim().is_empty() {
+        return Err("Không tìm thấy Page/User token, vui lòng Tải Trang lại".into());
+    }
+    report_with(
+        graph_base().as_str(),
+        &access_token,
+        &page_id,
+        page_name,
+        days,
+        REPORT_MAX_PAGES,
+    )
+    .await
+    .map_err(|e| report_error_message(&e))
+}
+
 async fn insights_with(
     base: &str,
     token: &str,
@@ -830,7 +1102,9 @@ pub async fn get_post_insights<R: Runtime>(app: AppHandle<R>, post_id: String) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wiremock::matchers::{header, method, path, query_param_is_missing};
+    use chrono::TimeZone;
+    use std::collections::HashMap;
+    use wiremock::matchers::{header, method, path, query_param, query_param_is_missing};
     use wiremock::{Match, Mock, MockServer, Request, ResponseTemplate};
 
     /// `body_string_contains` rejects bodies that are not valid UTF-8, and a
@@ -1573,5 +1847,365 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.kind, GraphFailureKind::InvalidParam);
         assert!(err.message.contains("tối đa 10"), "{}", err.message);
+    }
+
+    // --- Page report ---
+
+    fn report_post(id: &str, likes: Option<u64>, comments: Option<u64>, shares: Option<u64>) -> serde_json::Value {
+        let mut post = serde_json::json!({ "id": id });
+        if let Some(total) = likes {
+            post["likes"] = serde_json::json!({ "summary": { "total_count": total } });
+        }
+        if let Some(total) = comments {
+            post["comments"] = serde_json::json!({ "summary": { "total_count": total } });
+        }
+        if let Some(total) = shares {
+            post["shares"] = serde_json::json!({ "count": total });
+        }
+        post
+    }
+
+    #[test]
+    fn report_window_7_and_30_days() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 23, 12, 0, 0).unwrap();
+        let (since7, until7) = report_window(now, 7).unwrap();
+        assert_eq!(until7, now.timestamp());
+        assert_eq!(until7 - since7, 7 * 86_400);
+
+        let (since30, until30) = report_window(now, 30).unwrap();
+        assert_eq!(until30, now.timestamp());
+        assert_eq!(until30 - since30, 30 * 86_400);
+    }
+
+    #[tokio::test]
+    async fn report_rejects_other_day_ranges() {
+        // Cổng 1 không có service: nếu validation không chặn, lỗi sẽ là Network.
+        for days in [0_u32, 1, 6, 8, 29, 31] {
+            let err = report_with("http://127.0.0.1:1", "test-token", "123", None, days, 20)
+                .await
+                .unwrap_err();
+            assert_eq!(err.kind, GraphFailureKind::InvalidParam, "days={}", days);
+            assert_eq!(
+                err.message,
+                "Khoảng thời gian chỉ hỗ trợ 7 hoặc 30 ngày.",
+                "days={}",
+                days
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn report_rejects_invalid_page_id_before_network() {
+        let err = report_with("http://127.0.0.1:1", "test-token", "12ab", None, 7, 20)
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind, GraphFailureKind::InvalidParam);
+        assert!(err.message.contains("chữ số"), "{}", err.message);
+    }
+
+    #[tokio::test]
+    async fn report_request_shape_and_bearer() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/123/posts"))
+            .and(header("Authorization", "Bearer test-token"))
+            .and(query_param_is_missing("access_token"))
+            .and(query_param("fields", REPORT_FIELDS))
+            .and(query_param("limit", "100"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [report_post("123_1", Some(4), Some(2), Some(1))]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let report = report_with(
+            server.uri().as_str(),
+            "test-token",
+            "123",
+            Some("  Sống Tích Cực\u{0007}  ".to_string()),
+            7,
+            20,
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.page_id, "123");
+        assert_eq!(report.page_name.as_deref(), Some("Sống Tích Cực"));
+        assert_eq!(report.post_count, 1);
+        assert_eq!(report.total_reactions, 4);
+        assert_eq!(report.total_comments, 2);
+        assert_eq!(report.total_shares, 1);
+        assert_eq!(report.total_interactions, 7);
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        let query: HashMap<String, String> = requests[0]
+            .url
+            .query_pairs()
+            .into_owned()
+            .collect();
+        assert_eq!(query.get("fields").map(String::as_str), Some(REPORT_FIELDS));
+        assert_eq!(query.get("limit").map(String::as_str), Some("100"));
+        assert!(!query.contains_key("after"));
+        assert!(!query.contains_key("access_token"));
+        let since: i64 = query["since"].parse().unwrap();
+        let until: i64 = query["until"].parse().unwrap();
+        assert_eq!(until - since, 7 * 86_400);
+        assert!(since <= Utc::now().timestamp());
+        assert!((Utc::now().timestamp() - until).abs() <= 2);
+    }
+
+    #[tokio::test]
+    async fn report_paginates_with_after_only() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/123/posts"))
+            .and(query_param_is_missing("after"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [report_post("123_1", Some(1), Some(1), None)],
+                "paging": {
+                    "cursors": { "after": "cursor-1" },
+                    "next": "https://graph.facebook.com/v19.0/123/posts?after=next-token"
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/123/posts"))
+            .and(query_param("after", "cursor-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [report_post("123_2", Some(2), Some(0), None)]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let report = report_with(server.uri().as_str(), "test-token", "123", None, 7, 20)
+            .await
+            .unwrap();
+        assert_eq!(report.post_count, 2);
+        assert!(!report.truncated);
+        assert_eq!(report.total_reactions, 3);
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(!requests
+            .iter()
+            .any(|request| request.url.as_str().contains("next-token")));
+    }
+
+    #[tokio::test]
+    async fn report_stops_at_cap_and_marks_truncated() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/123/posts"))
+            .and(query_param_is_missing("after"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [report_post("123_1", Some(1), Some(1), Some(1))],
+                "paging": { "cursors": { "after": "cursor-1" } }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/123/posts"))
+            .and(query_param("after", "cursor-1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [report_post("123_2", Some(2), Some(2), Some(2))],
+                "paging": { "cursors": { "after": "cursor-2" } }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/123/posts"))
+            .and(query_param("after", "cursor-2"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [report_post("123_3", Some(3), Some(3), Some(3))]
+            })))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let report = report_with(server.uri().as_str(), "test-token", "123", None, 7, 2)
+            .await
+            .unwrap();
+        assert!(report.truncated);
+        assert_eq!(report.post_count, 2);
+        assert_eq!(report.total_interactions, 9);
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn report_missing_summary_fields_set_partial() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/123/posts"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [
+                    report_post("123_1", None, None, Some(2)),
+                    report_post("123_2", Some(3), None, Some(1))
+                ]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let report = report_with(server.uri().as_str(), "test-token", "123", None, 7, 20)
+            .await
+            .unwrap();
+        assert!(report.partial);
+        assert_eq!(report.total_reactions, 3);
+        assert_eq!(report.total_comments, 0);
+        assert_eq!(report.total_shares, 3);
+        assert_eq!(report.total_interactions, 6);
+    }
+
+    #[tokio::test]
+    async fn report_shares_missing_is_not_partial() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/123/posts"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [report_post("123_1", Some(4), Some(2), None)]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let report = report_with(server.uri().as_str(), "test-token", "123", None, 7, 20)
+            .await
+            .unwrap();
+        assert!(!report.partial);
+        assert_eq!(report.posts[0].shares, 0);
+        assert_eq!(report.total_interactions, 6);
+    }
+
+    #[tokio::test]
+    async fn report_skips_posts_without_id() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/123/posts"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [
+                    { "message": "không có id" },
+                    { "id": "" },
+                    { "id": 42 },
+                    report_post("123_1", Some(1), Some(1), Some(1))
+                ]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let report = report_with(server.uri().as_str(), "test-token", "123", None, 7, 20)
+            .await
+            .unwrap();
+        assert_eq!(report.post_count, 1);
+        assert_eq!(report.posts[0].id, "123_1");
+    }
+
+    #[tokio::test]
+    async fn report_empty_data_is_valid() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/123/posts"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "data": [] })),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let report = report_with(server.uri().as_str(), "test-token", "123", None, 30, 20)
+            .await
+            .unwrap();
+        assert_eq!(report.days, 30);
+        assert_eq!(report.post_count, 0);
+        assert!(report.posts.is_empty());
+        assert!(!report.partial);
+        assert!(!report.truncated);
+        assert_eq!(report.total_interactions, 0);
+    }
+
+    #[test]
+    fn report_error_messages_are_mapped_and_scrubbed() {
+        let failure = |kind, message: &str, retry_after_secs| GraphFailure {
+            kind,
+            http_status: 0,
+            code: None,
+            retry_after_secs,
+            message: message.to_string(),
+        };
+
+        assert_eq!(
+            report_error_message(&failure(GraphFailureKind::TokenInvalid, "x", None)),
+            "Token không hợp lệ hoặc đã hết hạn. Vào Cài đặt → Kết nối để cập nhật token, rồi Tải Trang lại."
+        );
+        assert_eq!(
+            report_error_message(&failure(GraphFailureKind::RateLimited, "x", Some(12))),
+            "Facebook đang giới hạn tần suất. Thử lại sau 12 giây."
+        );
+        assert_eq!(
+            report_error_message(&failure(GraphFailureKind::RateLimited, "x", None)),
+            "Facebook đang giới hạn tần suất. Thử lại sau ít phút."
+        );
+        assert_eq!(
+            report_error_message(&failure(GraphFailureKind::Network, "x", None)),
+            "Không thể kết nối Facebook. Kiểm tra mạng rồi thử lại."
+        );
+        assert_eq!(
+            report_error_message(&failure(GraphFailureKind::InvalidParam, "bad param", None)),
+            "Không tải được báo cáo: bad param"
+        );
+        assert_eq!(
+            report_error_message(&failure(GraphFailureKind::Other, "hỏng", None)),
+            "Không tải được báo cáo: hỏng"
+        );
+
+        let scrubbed = report_error_message(&failure(
+            GraphFailureKind::Other,
+            "request https://graph.facebook.com/v19.0/123/posts?access_token=SECRET_VALUE failed",
+            None,
+        ));
+        assert!(scrubbed.starts_with("Không tải được báo cáo:"), "{}", scrubbed);
+        assert!(!scrubbed.contains("https://"), "{}", scrubbed);
+        assert!(!scrubbed.contains("access_token"), "{}", scrubbed);
+        assert!(!scrubbed.contains("SECRET_VALUE"), "{}", scrubbed);
+    }
+
+    #[tokio::test]
+    async fn report_repeated_cursor_stops() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/123/posts"))
+            .and(query_param_is_missing("after"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [report_post("123_1", Some(1), Some(0), None)],
+                "paging": { "cursors": { "after": "same-cursor" } }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/123/posts"))
+            .and(query_param("after", "same-cursor"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [report_post("123_2", Some(1), Some(0), None)],
+                "paging": { "cursors": { "after": "same-cursor" } }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let report = report_with(server.uri().as_str(), "test-token", "123", None, 7, 20)
+            .await
+            .unwrap();
+        assert!(report.truncated);
+        assert_eq!(report.post_count, 2);
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
     }
 }

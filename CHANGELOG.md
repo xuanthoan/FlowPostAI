@@ -2,6 +2,35 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-25 — Trang Báo cáo đầy đủ + xuất CSV/PDF
+
+### Added
+- `src-tauri/src/facebook.rs` — `PageReport`/`ReportPost`, `report_window` (chỉ 7/30 ngày), `get_page_report`, phân trang bằng `paging.cursors.after` (100 bài/trang, tối đa 20 trang = 2.000 bài), tổng cảm xúc/bình luận/chia sẻ từ summary và cờ `partial`/`truncated`. Request dùng Bearer, không đưa token vào query.
+- `src-tauri/src/lib.rs` — lệnh `save_report_csv` với hộp thoại lưu native, sanitizer tên tệp Windows, giới hạn 32 MB, ghi UTF-8 nguyên văn (BOM do frontend thêm).
+- `src/reportCsv.js` — builder CSV thuần: khối summary tiếng Việt, bảng bài viết, RFC4180 quoting và trung hòa formula injection; tên tệp `bao-cao-{slug}-{days}ngay-{YYYY-MM-DD}.csv`.
+- `src/App.jsx` — `ReportPage` trong sidebar `Báo cáo`: chọn Trang, 7/30 ngày, stat cards, bảng bài viết, cảnh báo stale/truncated/partial, `Xuất CSV` và `Xuất PDF` (window.print → Save as PDF).
+- `src/styles.css` — style trang báo cáo và `@media print` khổ A4 landscape.
+- `e2e/report.spec.ts` — E2E mock cho on-demand, chọn Trang/ngày, CSV và PDF.
+- `README.md` — hướng dẫn chọn Trang/7/30 ngày, công thức tương tác, giới hạn 2.000 bài, CSV/PDF và quy tắc không gọi Graph khi mount/đổi bộ lọc/xuất.
+
+### Changed
+- Dashboard quick report (`loadGraph`, nút `Tải báo cáo`, timestamp/snapshot) giữ nguyên hành vi và vẫn là 5 Graph call trong `e2e/ai.spec.ts`.
+- Báo cáo mới chỉ gọi Graph khi bấm `Tải báo cáo` hoặc `Tải lại danh sách Trang`; đổi Trang/khoảng ngày chỉ đánh dấu stale và tắt xuất cho đến khi tải lại.
+
+### Verified
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib` — 346 passed / 0 failed (331 test cũ + 15 test báo cáo/CSV mới).
+- `npm exec -- eslint .` — exit 0.
+- `npm run build` — success (Vite 8.2.2).
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/report.spec.ts` — 4 passed / 0 failed.
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts` — 42 passed / 0 failed, gồm `e2e/ai.spec.ts` 7 passed (quick report vẫn đúng 5 Graph call) và `e2e/report.spec.ts` 4 passed.
+
+### Unverified
+- Chưa chạy smoke test với Facebook Graph thật và hộp thoại in/Save as PDF thật vì môi trường không có token Facebook thật; phần này cần kiểm tra thủ công trên ứng dụng desktop có token.
+
+### Notes
+- Tổng tương tác của trang báo cáo = cảm xúc + bình luận + chia sẻ trên các bài đã tải, khác với insights impressions/engaged/clicks ở Dashboard.
+- PDF dùng hộp thoại in của hệ thống/WebView2; không thêm dependency tạo PDF.
+
 ## [Unreleased] - 2026-10-23 — Báo cáo Facebook tải theo yêu cầu
 
 ### Changed

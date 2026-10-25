@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { LayoutDashboard, Sparkles, Images, CalendarDays, Send, BarChart3, Settings, Search, TrendingUp, FileText, Heart, MessageCircle, Plus, Clock3, CircleCheck, MoreHorizontal, WandSparkles, Zap, Upload, HardDrive, Film, Trash2, RefreshCw, X, Pencil, Bot } from 'lucide-react'
+import { LayoutDashboard, Sparkles, Images, CalendarDays, Send, BarChart3, Settings, Search, TrendingUp, FileText, Heart, MessageCircle, Plus, Clock3, CircleCheck, MoreHorizontal, WandSparkles, Zap, Upload, HardDrive, Film, Trash2, RefreshCw, X, Pencil, Bot, Download, Printer } from 'lucide-react'
 import { invokeDesktop, isDesktop, localAssetUrl } from './tauri.js'
+import { buildReportCsv, reportCsvFileName } from './reportCsv.js'
 import { DEFAULT_LOCAL_BASE_URL, PROVIDER_PRESETS, isDefaultLocalBase } from './providerPresets'
 
 function weekdayLabel(date) {
@@ -1998,6 +1999,224 @@ function DashboardSchedulePanel({ onViewAll, resolveStyleName }) {
   </div>
 }
 
+function formatReportDate(seconds) {
+  const date = new Date(Number(seconds) * 1000)
+  if (Number.isNaN(date.getTime())) return '—'
+  return date.toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+function formatReportTime(date) {
+  return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+function formatReportPostTime(value) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+function truncateReportMessage(message) {
+  const text = message || '(Không có nội dung)'
+  return text.length > 160 ? `${text.slice(0, 157)}...` : text
+}
+
+function ReportPage({ desktop }) {
+  const [pages, setPages] = useState([])
+  const [pagesLoaded, setPagesLoaded] = useState(false)
+  const [pageId, setPageId] = useState('')
+  const [configuredPageId, setConfiguredPageId] = useState('')
+  const [days, setDays] = useState(7)
+  const [report, setReport] = useState(null)
+  const [updatedAt, setUpdatedAt] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [listing, setListing] = useState(false)
+  const [err, setErr] = useState('')
+  const [message, setMessage] = useState('')
+  const busyRef = useRef(false)
+  const configPromiseRef = useRef(null)
+
+  // Mount only reads the local scheduler config; the page list and report stay
+  // on demand so opening the tab never calls Graph.
+  useEffect(() => {
+    if (!desktop) return
+    let cancelled = false
+    configPromiseRef.current = invokeDesktop('get_scheduler_config')
+      .then(config => {
+        const selected = config?.selectedPageId || ''
+        if (!cancelled) setConfiguredPageId(selected)
+        return selected
+      })
+      .catch(() => '')
+    return () => { cancelled = true }
+  }, [desktop])
+
+  // A fast click must still wait for the persisted page choice before the
+  // first report request, otherwise it would silently target pages[0].
+  const configuredPage = async () => {
+    if (!configPromiseRef.current) return configuredPageId
+    const selected = await configPromiseRef.current
+    return selected || configuredPageId
+  }
+
+  const pickPage = (list, preferred, configured) => {
+    if (preferred && list.some(page => page.id === preferred)) return preferred
+    return configured && list.some(page => page.id === configured) ? configured : (list[0]?.id || '')
+  }
+
+  const loadReport = async () => {
+    if (!desktop || busyRef.current) return
+    busyRef.current = true
+    setLoading(true)
+    setErr('')
+    setMessage('')
+    try {
+      const configured = await configuredPage()
+      let available = pages
+      if (!available.length) {
+        const list = await invokeDesktop('list_facebook_pages', { token: '' })
+        available = Array.isArray(list) ? list : []
+        setPages(available)
+        setPagesLoaded(true)
+      }
+      if (!available.length) {
+        setReport(null)
+        setUpdatedAt(null)
+        setErr('Chưa có Trang Facebook. Vào Cài đặt → Kết nối → Tải Trang.')
+        return
+      }
+      const target = pickPage(available, pageId, configured)
+      const targetPage = available.find(page => page.id === target)
+      setPageId(target)
+      const data = await invokeDesktop('get_page_report', {
+        pageId: target,
+        pageName: targetPage?.name || null,
+        days,
+      })
+      setReport(data)
+      setUpdatedAt(new Date())
+    } catch (reason) {
+      setReport(null)
+      setUpdatedAt(null)
+      setErr(String(reason?.message || reason))
+    } finally {
+      setLoading(false)
+      busyRef.current = false
+    }
+  }
+
+  const reloadPages = async () => {
+    if (!desktop || busyRef.current) return
+    busyRef.current = true
+    setListing(true)
+    setErr('')
+    setMessage('')
+    try {
+      const configured = await configuredPage()
+      const list = await invokeDesktop('list_facebook_pages', { token: '' })
+      const available = Array.isArray(list) ? list : []
+      setPages(available)
+      setPagesLoaded(true)
+      setReport(null)
+      setUpdatedAt(null)
+      setPageId(pickPage(available, '', configured))
+    } catch (reason) {
+      setErr(String(reason?.message || reason))
+    } finally {
+      setListing(false)
+      busyRef.current = false
+    }
+  }
+
+  const stale = Boolean(report) && (Number(report.days) !== Number(days) || report.pageId !== pageId)
+  const exportDisabled = !desktop || !report || stale || loading || listing
+
+  const exportCsv = async () => {
+    if (exportDisabled) return
+    setErr('')
+    setMessage('')
+    try {
+      const contents = `\uFEFF${buildReportCsv(report)}`
+      const path = await invokeDesktop('save_report_csv', {
+        defaultName: reportCsvFileName(report),
+        contents,
+      })
+      setMessage(path ? `Đã lưu CSV: ${path}` : 'Đã huỷ lưu CSV.')
+    } catch (reason) {
+      setErr(String(reason?.message || reason))
+    }
+  }
+
+  const exportPdf = () => {
+    if (exportDisabled) return
+    setMessage('Chọn "Save as PDF" trong hộp thoại in để lưu PDF.')
+    window.print()
+  }
+
+  const totalOf = (value) => (report ? String(value) : '—')
+
+  return <section className="report-page">
+    <div className="page-heading"><div><p>BÁO CÁO</p><h1>Báo cáo hiệu suất</h1><span>Số liệu công khai theo Trang và khoảng thời gian</span></div></div>
+    {!desktop && <div className="desktop-notice"><BarChart3 size={23}/><div><strong>Báo cáo chỉ hoạt động trong ứng dụng desktop.</strong><span>Hãy mở FlowPost AI Desktop để chọn Trang và tải số liệu Facebook.</span></div></div>}
+
+    <div className="report-controls">
+      <label>Trang
+        <select aria-label="Chọn Trang" value={pageId} onChange={e => { setPageId(e.target.value); setMessage('') }} disabled={!desktop || !pages.length || loading || listing}>
+          {!pages.length && <option value="">{pagesLoaded ? 'Chưa có Trang' : 'Chưa tải danh sách Trang'}</option>}
+          {pages.map(page => <option key={page.id} value={page.id}>{page.name}</option>)}
+        </select>
+      </label>
+      <label>Khoảng thời gian
+        <select aria-label="Khoảng thời gian" value={days} onChange={e => { setDays(Number(e.target.value)); setMessage('') }} disabled={!desktop || loading || listing}>
+          <option value={7}>7 ngày qua</option>
+          <option value={30}>30 ngày qua</option>
+        </select>
+      </label>
+      <button className="primary" onClick={loadReport} disabled={!desktop || loading || listing}><RefreshCw size={15}/> {loading ? 'Đang tải...' : 'Tải báo cáo'}</button>
+      <button className="outline" onClick={reloadPages} disabled={!desktop || loading || listing}><RefreshCw size={15}/> {listing ? 'Đang tải...' : 'Tải lại danh sách Trang'}</button>
+      <div className="export-actions">
+        <button className="outline" onClick={exportCsv} disabled={exportDisabled}><Download size={15}/> Xuất CSV</button>
+        <button className="outline" onClick={exportPdf} disabled={exportDisabled}><Printer size={15}/> Xuất PDF</button>
+      </div>
+    </div>
+    <p className="report-print-hint">Chọn &quot;Save as PDF&quot; trong hộp thoại in để lưu PDF.</p>
+    {err && <div className="error-box">{err}</div>}
+    {message && <div className="report-message">{message}</div>}
+    {stale && <div className="report-warning">Bộ lọc đã thay đổi — bấm Tải báo cáo để cập nhật</div>}
+
+    <div className="report-print">
+      {report && <>
+        <div className="report-period">Trang: {report.pageName || report.pageId} • {report.days} ngày • {formatReportDate(report.since)} → {formatReportDate(report.until)} • Cập nhật lúc {formatReportTime(updatedAt || new Date())}</div>
+        {report.truncated && <div className="report-warning">Đã đạt giới hạn 2.000 bài; số liệu chỉ tính trên các bài đã tải.</div>}
+        {report.partial && <div className="report-warning">Một số bài thiếu summary cảm xúc/bình luận; tổng có thể thấp hơn thực tế.</div>}
+      </>}
+
+      <section className="stats-grid report-stats">
+        <StatCard icon={FileText} iconClass="purple" label="Tổng số bài" value={totalOf(report?.postCount)} delta="" sub={report ? `${report.days} ngày` : 'chưa tải báo cáo'}/>
+        <StatCard icon={TrendingUp} iconClass="blue" label="Tổng tương tác" value={totalOf(report?.totalInteractions)} delta="" sub="cảm xúc + bình luận + chia sẻ"/>
+        <StatCard icon={Heart} iconClass="orange" label="Cảm xúc" value={totalOf(report?.totalReactions)} delta="" sub="reactions trên bài đã tải"/>
+        <StatCard icon={MessageCircle} iconClass="green" label="Bình luận / Chia sẻ" value={report ? `${report.totalComments} / ${report.totalShares}` : '—'} delta="" sub="comments / shares"/>
+      </section>
+      <p className="report-formula">Tương tác = cảm xúc + bình luận + chia sẻ</p>
+
+      {report && report.postCount === 0 && <div className="report-empty">Trang không có bài viết trong khoảng thời gian này.</div>}
+      {report && report.postCount > 0 && <div className="table-wrap report-table-wrap">
+        <table className="report-table">
+          <thead><tr><th>NỘI DUNG</th><th>THỜI GIAN</th><th>CẢM XÚC</th><th>BÌNH LUẬN</th><th>CHIA SẺ</th><th>TƯƠNG TÁC</th></tr></thead>
+          <tbody>{report.posts.map(post => <tr key={post.id}>
+            <td><span className="report-post-message" title={post.message || ''}>{truncateReportMessage(post.message)}</span></td>
+            <td>{formatReportPostTime(post.createdTime)}</td>
+            <td>{post.reactions}</td>
+            <td>{post.comments}</td>
+            <td>{post.shares}</td>
+            <td><strong>{post.reactions + post.comments + post.shares}</strong></td>
+          </tr>)}</tbody>
+        </table>
+      </div>}
+    </div>
+  </section>
+}
+
 function App() {
   const [active, setActive] = useState('Tổng quan')
   const [period, setPeriod] = useState('7 ngày qua')
@@ -2198,7 +2417,7 @@ function App() {
     <main>
       <header><div className="search"><Search size={18}/><input spellCheck={false} aria-label="Tìm kiếm" placeholder="Tìm kiếm nội dung, bài viết..." disabled style={{opacity:0.6}}/></div><div className="head-actions"><button className="primary" onClick={createPost}><Plus size={19}/> Tạo nội dung mới</button></div></header>
       <div className="content">
-        {active === 'AI Content' ? <AiContentPage/> : active === 'Kho nội dung' ? <ContentWarehousePage resolveStyleName={resolveStyleName}/> : active === 'Thư viện media' ? <MediaLibrary/> : active === 'Lịch đăng bài' ? <SchedulePage/> : active === 'Lịch AI content' ? <AutoSchedulePage desktop={desktop} /> : active === 'Cài đặt' ? <SettingsPage/> : <>
+        {active === 'AI Content' ? <AiContentPage/> : active === 'Kho nội dung' ? <ContentWarehousePage resolveStyleName={resolveStyleName}/> : active === 'Thư viện media' ? <MediaLibrary/> : active === 'Lịch đăng bài' ? <SchedulePage/> : active === 'Lịch AI content' ? <AutoSchedulePage desktop={desktop} /> : active === 'Báo cáo' ? <ReportPage desktop={desktop} /> : active === 'Cài đặt' ? <SettingsPage/> : <>
         <section className="welcome"><div><p>{today}</p><h1>{getGreeting()}</h1><div className="welcome-sub">Hôm nay bạn có <b>{dashboardScheduled} bài viết</b> đang chờ được đăng.</div></div><button className="outline" onClick={()=>setActive('Lịch đăng bài')}><CalendarDays size={17}/> Xem lịch đăng bài</button></section>
 
         <section className="stats-grid">

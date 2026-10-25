@@ -240,6 +240,82 @@ fn media_location(app: AppHandle) -> Result<String, String> {
     Ok(media_dir(&app)?.to_string_lossy().to_string())
 }
 
+pub(crate) const REPORT_MAX_CSV_BYTES: usize = 32 * 1024 * 1024;
+
+/// Tên tệp CSV an toàn cho Windows: bỏ ký tự cấm/điều khiển, ép đuôi `.csv`,
+/// giới hạn 120 ký tự và tránh tên thiết bị dành riêng (CON, PRN, AUX, ...).
+fn sanitize_report_csv_name(input: &str) -> String {
+    let cleaned: String = input
+        .chars()
+        .filter(|c| {
+            !c.is_control() && !matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+        })
+        .collect();
+    let trimmed = cleaned.trim().trim_matches(|c| c == '.' || c == ' ');
+    let base = if trimmed.to_ascii_lowercase().ends_with(".csv") {
+        &trimmed[..trimmed.len() - 4]
+    } else {
+        trimmed
+    };
+    let mut base = base.trim().trim_matches(|c| c == '.' || c == ' ').to_string();
+    if base.is_empty() {
+        base = "bao-cao".to_string();
+    }
+    let stem = base
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_uppercase();
+    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (stem.len() == 4
+            && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.as_bytes()[3].is_ascii_digit()
+            && stem.as_bytes()[3] != b'0');
+    if reserved {
+        base = format!("bao-cao-{}", base);
+    }
+    // 120 ký tự bao gồm cả đuôi `.csv`.
+    let base: String = base.chars().take(116).collect();
+    let base = base.trim_end_matches(|c| c == '.' || c == ' ');
+    if base.is_empty() {
+        "bao-cao.csv".to_string()
+    } else {
+        format!("{}.csv", base)
+    }
+}
+
+fn validate_report_csv_contents(contents: &str) -> Result<(), String> {
+    if contents.is_empty() {
+        return Err("Nội dung CSV rỗng.".to_string());
+    }
+    if contents.len() > REPORT_MAX_CSV_BYTES {
+        return Err("Tệp CSV quá lớn (tối đa 32 MB).".to_string());
+    }
+    Ok(())
+}
+
+fn write_csv_file(path: &Path, contents: &str) -> Result<(), String> {
+    fs::write(path, contents.as_bytes())
+        .map_err(|e| format!("Không thể lưu tệp CSV: {}", e))
+}
+
+#[tauri::command]
+fn save_report_csv(default_name: String, contents: String) -> Result<Option<String>, String> {
+    validate_report_csv_contents(&contents)?;
+    let name = sanitize_report_csv_name(&default_name);
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Lưu báo cáo CSV")
+        .set_file_name(&name)
+        .add_filter("CSV", &["csv"])
+        .save_file()
+    else {
+        return Ok(None);
+    };
+    write_csv_file(&path, &contents)?;
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,6 +537,68 @@ mod tests {
 
         fs::remove_dir_all(&dir).unwrap();
     }
+
+    #[test]
+    fn sanitize_report_csv_name_strips_paths_and_reserved_names() {
+        let path_name = sanitize_report_csv_name("..\\..\\CON.txt");
+        assert!(!path_name.contains('\\'), "{}", path_name);
+        assert!(!path_name.contains('/'), "{}", path_name);
+        assert!(path_name.ends_with(".csv"), "{}", path_name);
+        assert!(path_name.starts_with("bao-cao-"), "{}", path_name);
+
+        assert_eq!(
+            sanitize_report_csv_name("C:\\temp\\bao-cao.csv"),
+            "Ctempbao-cao.csv"
+        );
+        assert_eq!(
+            sanitize_report_csv_name("bao-cao-song-tich-cuc-7ngay-2026-10-23.csv"),
+            "bao-cao-song-tich-cuc-7ngay-2026-10-23.csv"
+        );
+        assert_eq!(
+            sanitize_report_csv_name("Báo cáo tháng 10"),
+            "Báo cáo tháng 10.csv"
+        );
+        assert_eq!(sanitize_report_csv_name("   "), "bao-cao.csv");
+
+        for reserved in ["CON", "PRN", "AUX", "NUL", "COM1", "LPT9", "con.csv"] {
+            let name = sanitize_report_csv_name(reserved);
+            assert!(name.starts_with("bao-cao-"), "{} -> {}", reserved, name);
+            assert!(name.ends_with(".csv"), "{} -> {}", reserved, name);
+        }
+
+        let long = sanitize_report_csv_name(&"a".repeat(500));
+        assert!(long.chars().count() <= 120, "{} ký tự", long.chars().count());
+        assert!(long.ends_with(".csv"), "{}", long);
+    }
+
+    #[test]
+    fn write_csv_file_preserves_bom_and_utf8() {
+        let dir = unique_temp_dir("flowpost_csv_write");
+        let path = dir.join("bao-cao.csv");
+        let contents = "\u{FEFF}Trang,Tổng số bài\r\nSống Tích Cực,2\r\nNội dung \"trích dẫn\"\r\n";
+
+        write_csv_file(&path, contents).unwrap();
+
+        let bytes = fs::read(&path).unwrap();
+        assert_eq!(bytes, contents.as_bytes());
+        assert!(bytes.starts_with(&[0xEF, 0xBB, 0xBF]), "thiếu UTF-8 BOM");
+        assert_eq!(String::from_utf8(bytes).unwrap(), contents);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn save_report_csv_rejects_empty_and_oversize_contents() {
+        assert_eq!(
+            validate_report_csv_contents("").unwrap_err(),
+            "Nội dung CSV rỗng."
+        );
+        let oversize = "a".repeat(REPORT_MAX_CSV_BYTES + 1);
+        assert_eq!(
+            validate_report_csv_contents(&oversize).unwrap_err(),
+            "Tệp CSV quá lớn (tối đa 32 MB)."
+        );
+    }
 }
 
 pub fn run() {
@@ -477,6 +615,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_media,
             import_media,
+            save_report_csv,
             delete_media,
             media_location,
             security::set_facebook_token,
@@ -528,6 +667,7 @@ pub fn run() {
             facebook::publish_content,
             facebook::list_page_posts,
             facebook::get_post_insights,
+            facebook::get_page_report,
             schedule::get_scheduler_config,
             schedule::set_scheduler_config,
             schedule::select_scheduler_page,
