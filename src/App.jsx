@@ -543,7 +543,7 @@ function SettingsPage() {
           <button className="primary" onClick={saveFb} disabled={!desktop || busy} style={{height:36}}><Zap size={14}/> Lưu</button>
           <button className="outline" onClick={checkFb} disabled={!desktop || busy} style={{height:36}}><Search size={14}/> Kiểm tra</button>
           <button className="outline" onClick={loadPages} disabled={!desktop || busy} style={{height:36}}><FileText size={14}/> Tải Trang</button>
-          <button className="outline" onClick={()=>setShowPublish(true)} disabled={!desktop || busy || pages.length===0} style={{height:36}}><Send size={14}/> Đăng bài</button>
+          <button className="outline" onClick={()=>setShowPublish(true)} disabled={!desktop || busy || pages.length===0} style={{height:36}}><Send size={14}/> Đăng ngay</button>
           <button className="outline" onClick={deleteFb} disabled={!desktop || busy || !status.hasFacebookToken} style={{height:36}}><Trash2 size={14}/> Xóa</button>
         </div>
         {pages.length > 0 && <div className="panel" style={{marginTop:10, padding:10, background:'#f9fafb'}}>
@@ -567,7 +567,7 @@ function SettingsPage() {
       </div>
       </div>
     </div>}
-    {showPublish && <PublishModal onClose={()=>setShowPublish(false)} onSuccess={()=>{}} />}
+    {showPublish && <PublishModal initialPages={pages} onClose={() => setShowPublish(false)} onSuccess={() => {}} />}
   </section>
 }
 
@@ -1396,24 +1396,46 @@ function ScheduleModal({ contentId, onClose, onCreated }) {
   </div>
 }
 
-function PublishModal({ onClose, onSuccess }) {
+function PublishModal({ onClose, onSuccess, initialPages }) {
+  return (
+    <div className="publish-overlay" style={{position:'fixed',inset:0,background:'#0008',display:'grid',placeItems:'center',zIndex:60}} onClick={onClose}>
+      <div className="panel publish-modal" style={{width:440,padding:24,display:'flex',flexDirection:'column',gap:16}} onClick={e=>e.stopPropagation()}>
+        <h2 style={{margin:0,fontSize:19}}>Đăng bài ngay</h2>
+        <PublishForm initialPages={initialPages} onCancel={onClose}
+          onSuccess={() => { onSuccess && onSuccess(); setTimeout(onClose, 1500) }} />
+      </div>
+    </div>
+  )
+}
+
+function PublishPage({ desktop }) {
+  return <section className="publish-page">
+    <div className="page-heading"><div><p>ĐĂNG BÀI</p><h1>Đăng bài</h1><span>Đăng nội dung lên Trang Facebook đã kết nối, kèm tối đa 10 ảnh.</span></div></div>
+    {!desktop && <div className="desktop-notice"><Send size={18}/><div><strong>Chỉ hỗ trợ bản Desktop</strong><span>Đăng bài cần Tauri Desktop và Facebook Token đã lưu trong Cài đặt.</span></div></div>}
+    <div className="panel publish-panel"><PublishForm /></div>
+  </section>
+}
+
+const CONTENT_STATUS_LABELS = { draft: 'Nháp', approved: 'Đã duyệt', archived: 'Lưu trữ' }
+const contentStatusLabel = (s) => CONTENT_STATUS_LABELS[s] || s
+
+function PublishForm({ initialPages = [], onSuccess, onCancel }) {
   const desktop = isDesktop()
-  const [pages, setPages] = useState([])
+  const [pages, setPages] = useState(initialPages)
+  const [pagesLoading, setPagesLoading] = useState(false)
+  const [pagesLoaded, setPagesLoaded] = useState(initialPages.length > 0)
   const [pageId, setPageId] = useState('')
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
   const [err, setErr] = useState('')
   const [msg, setMsg] = useState('')
   const [mediaItems, setMediaItems] = useState([])
   const [selectedMediaIds, setSelectedMediaIds] = useState([])
   const [showPicker, setShowPicker] = useState(false)
-
-  // Load pages when modal opens (use empty token → backend lấy từ keyring)
-  useEffect(() => {
-    invokeDesktop('list_facebook_pages', { token: '' })
-      .then(setPages)
-      .catch(e => setErr(String(e)))
-  }, [])
+  const [contentItems, setContentItems] = useState([])
+  const [showContent, setShowContent] = useState(false)
+  const [contentLoaded, setContentLoaded] = useState(false)
 
   const loadMedia = async () => {
     if (!desktop) return
@@ -1427,6 +1449,27 @@ function PublishModal({ onClose, onSuccess }) {
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
   useEffect(() => { if (showPicker) loadMedia() }, [showPicker])
 
+  const loadPages = async () => {
+    if (!desktop || pagesLoading) return
+    setPagesLoading(true); setErr('')
+    try {
+      const list = await invokeDesktop('list_facebook_pages', { token: '' })
+      setPages(Array.isArray(list) ? list : []); setPagesLoaded(true)
+    } catch (e) { setErr(String(e)) } finally { setPagesLoading(false) }
+  }
+
+  const toggleContentPicker = async () => {
+    const next = !showContent
+    setShowContent(next)
+    if (!next || contentLoaded) return
+    try {
+      const list = await invokeDesktop('list_content')
+      setContentItems(Array.isArray(list) ? list : []); setContentLoaded(true)
+    } catch (e) { setErr(String(e)) }
+  }
+
+  const applyContent = (c) => { setMessage(String(c.body ?? '')); setErr(''); setMsg(''); setShowContent(false) }
+
   const togglePublishMedia = (m) => {
     setErr('')
     if (m.mediaType !== 'image') { setErr('Chỉ hỗ trợ ảnh (jpg/jpeg/png/webp/gif)'); return }
@@ -1436,63 +1479,70 @@ function PublishModal({ onClose, onSuccess }) {
   }
 
   const handlePublish = async () => {
-    if (!pageId || !message.trim()) return
-    setBusy(true); setErr(''); setMsg('')
+    if (busyRef.current || !pageId || !message.trim()) return
+    busyRef.current = true; setBusy(true); setErr(''); setMsg('')
     try {
       const paths = selectedMediaIds.map(id => mediaItems.find(m => m.id === id)).filter(Boolean).map(m => m.path)
       const res = await invokeDesktop('publish_content', { page_id: pageId, message, image_path: paths[0] ?? null, image_paths: paths })
       setMsg(`Đã đăng thành công (post ID: ${res.id || 'unknown'})`)
-      onSuccess && onSuccess()
-      setTimeout(onClose, 1500)
-    } catch (e) { setErr(String(e)) } finally { setBusy(false) }
+      onSuccess && onSuccess(res)
+    } catch (e) { setErr(String(e)) } finally { busyRef.current = false; setBusy(false) }
   }
 
   const selectedImages = selectedMediaIds.map(id => mediaItems.find(m => m.id === id)).filter(Boolean)
 
   return (
-    <div style={{position:'fixed', inset:0, background:'#0008', display:'grid', placeItems:'center', zIndex:60}} onClick={onClose}>
-      <div className="panel" style={{width:440, padding:24, display:'flex', flexDirection:'column', gap:16}} onClick={e=>e.stopPropagation()}>
-        <h2 style={{margin:0, fontSize:19}}>Đăng bài ngay</h2>
-        {pages.length === 0 && <p style={{fontSize:14, color:'#666'}}>Chưa có Trang nào. Hãy bấm "Tải Trang" ở Cài đặt để tải danh sách.</p>}
-        <select value={pageId} onChange={e=>setPageId(e.target.value)} disabled={busy}>
-          <option value="">-- Chọn Trang --</option>
-          {pages.map(p => <option key={p.id} value={p.id}>{p.name} ({p.id})</option>)}
-        </select>
-        <textarea spellCheck={false} value={message} onChange={e=>setMessage(e.target.value)} placeholder="Nội dung bài đăng..." disabled={busy} style={{width:'100%', minHeight:100, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:8, fontSize:14, resize:'vertical'}} />
-        <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{charCount(message)} ký tự</div>
-        <div>
-          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:4}}>
-            <label style={{fontSize:13, fontWeight:700}}>Ảnh đính kèm (tùy chọn, tối đa 10 ảnh)</label>
-            <button className="outline" onClick={()=>setShowPicker(v=>!v)} disabled={!desktop || busy} style={{height:30, fontSize:13}}><Images size={12}/> {showPicker ? 'Ẩn' : 'Chọn ảnh'}</button>
-          </div>
-          {!desktop && showPicker && <div style={{fontSize:12, color:'#777', marginTop:4}}>Chọn ảnh chỉ hoạt động trong bản Tauri Desktop</div>}
-          {showPicker && <div style={{marginTop:8, maxHeight:160, overflowY:'auto', border:'1px solid #eee', borderRadius:8, padding:8, background:'#fafafa'}}>
-            {mediaItems.length ? <div style={{display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:6}}>
-              {mediaItems.map(m => <div key={m.id} onClick={()=>togglePublishMedia(m)} title={m.mediaType==='image' ? undefined : 'Chỉ hỗ trợ ảnh'} style={{border: selectedMediaIds.includes(m.id) ? '2px solid #6558d6' : '1px solid #e8e8ed', borderRadius:8, overflow:'hidden', cursor: m.mediaType==='image' ? 'pointer' : 'not-allowed', opacity: m.mediaType==='image' ? 1 : 0.55, background:'#fff'}}>
-                <div style={{aspectRatio:1, overflow:'hidden', background:'#f5f5f5', display:'grid', placeItems:'center'}}>{m.mediaType==='image' ? <img src={m.url} alt={m.name} style={{width:'100%', height:'100%', objectFit:'cover'}}/> : <><video src={m.url} style={{width:'100%', height:'100%', objectFit:'cover'}}/><div style={{fontSize:11, color:'#777'}}><Film size={10}/> VIDEO</div></>}</div>
-                <div style={{padding:4, fontSize:11, textAlign:'center', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', background: selectedMediaIds.includes(m.id) ? '#f0eefc' : '#fff', color: selectedMediaIds.includes(m.id) ? '#6558d6' : '#333'}}>{selectedMediaIds.includes(m.id) ? '✓ ' : ''}{m.name}</div>
-              </div>)}
-            </div> : <span style={{fontSize:13, color:'#777'}}>Thư viện trống — hãy nhập media trước</span>}
-          </div>}
-          {selectedMediaIds.length > 0 && <div style={{fontSize:12, color:'#6558d6', marginTop:4, display:'flex', alignItems:'center', gap:6, flexWrap:'wrap'}}>
-            <span>Đã chọn {selectedMediaIds.length} ảnh để đăng kèm</span>
-            {selectedImages.slice(0,4).map(m => <img key={m.id} src={m.url} alt={m.name} style={{width:28, height:28, objectFit:'cover', borderRadius:4, border:'1px solid #e8e8ed'}}/>)}
-            {selectedImages.length > 4 && <span>+{selectedImages.length - 4}</span>}
-          </div>}
+    <div className="publish-form">
+      <div>
+        <div className="publish-form-row">
+          <button className="outline" onClick={loadPages} aria-label="Tải danh sách Trang" disabled={!desktop || pagesLoading || busy} style={{height:32, fontSize:13}}><RefreshCw size={12}/> {pagesLoading ? 'Đang tải...' : 'Tải danh sách Trang'}</button>
         </div>
-        {err && <div className="error-box" style={{marginTop:8}}>{err}</div>}
-        {msg && <div className="desktop-notice" style={{background:'#eef7ee', borderColor:'#cde9cd', color:'#2e6b2e', marginTop:8, padding:8}}><CircleCheck size={14}/><span>{msg}</span></div>}
-        <div style={{display:'flex', justifyContent:'flex-end', gap:8}}>
-          <button className="outline" onClick={onClose} disabled={busy} style={{height:36}}><X size={14}/> Đóng</button>
-          <button className="primary" onClick={handlePublish} disabled={busy || !pageId || !message.trim()} style={{height:36}}><Send size={14}/> Đăng ngay</button>
+        {pages.length === 0 && !pagesLoaded && <p className="publish-hint">Bấm "Tải danh sách Trang" để tải danh sách Trang từ Facebook.</p>}
+        {pages.length === 0 && pagesLoaded && <p className="publish-hint">Chưa có Trang nào. Hãy vào Cài đặt → Kết nối → Tải Trang.</p>}
+      </div>
+      <select aria-label="Chọn Trang" value={pageId} onChange={e=>setPageId(e.target.value)} disabled={busy || pagesLoading}>
+        <option value="">-- Chọn Trang --</option>
+        {pages.map(p => <option key={p.id} value={p.id}>{p.name} ({p.id})</option>)}
+      </select>
+      <div>
+        <button className="outline" onClick={toggleContentPicker} aria-label="Chọn từ Kho nội dung" disabled={!desktop || busy} style={{height:30, fontSize:13}}><FileText size={12}/> Chọn từ Kho nội dung</button>
+        {showContent && <div className="publish-picker">
+          {contentItems.length ? <div className="publish-content-list">
+            {contentItems.map(c => <button key={c.id} className="outline" onClick={()=>applyContent(c)} style={{height:'auto', padding:'8px 10px', justifyContent:'space-between', textAlign:'left'}}><span style={{fontSize:13, fontWeight:600}}>{c.title}</span><span style={{fontSize:11, color:'#8e8c96'}}>{contentStatusLabel(c.status)}</span></button>)}
+          </div> : <span style={{fontSize:13, color:'#777'}}>Kho nội dung trống</span>}
+        </div>}
+      </div>
+      <textarea aria-label="Nội dung bài đăng" spellCheck={false} value={message} onChange={e=>setMessage(e.target.value)} placeholder="Nội dung bài đăng..." disabled={busy} style={{width:'100%', minHeight:100, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:8, fontSize:14, resize:'vertical'}} />
+      <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{charCount(message)} ký tự</div>
+      <div>
+        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:4}}>
+          <label style={{fontSize:13, fontWeight:700}}>Ảnh đính kèm (tùy chọn, tối đa 10 ảnh)</label>
+          <button className="outline" onClick={()=>setShowPicker(v=>!v)} disabled={!desktop || busy} style={{height:30, fontSize:13}}><Images size={12}/> {showPicker ? 'Ẩn' : 'Chọn ảnh'}</button>
         </div>
+        {!desktop && showPicker && <div style={{fontSize:12, color:'#777', marginTop:4}}>Chọn ảnh chỉ hoạt động trong bản Tauri Desktop</div>}
+        {showPicker && <div style={{marginTop:8, maxHeight:160, overflowY:'auto', border:'1px solid #eee', borderRadius:8, padding:8, background:'#fafafa'}}>
+          {mediaItems.length ? <div style={{display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:6}}>
+            {mediaItems.map(m => <div key={m.id} onClick={()=>togglePublishMedia(m)} title={m.mediaType==='image' ? undefined : 'Chỉ hỗ trợ ảnh'} style={{border: selectedMediaIds.includes(m.id) ? '2px solid #6558d6' : '1px solid #e8e8ed', borderRadius:8, overflow:'hidden', cursor: m.mediaType==='image' ? 'pointer' : 'not-allowed', opacity: m.mediaType==='image' ? 1 : 0.55, background:'#fff'}}>
+              <div style={{aspectRatio:1, overflow:'hidden', background:'#f5f5f5', display:'grid', placeItems:'center'}}>{m.mediaType==='image' ? <img src={m.url} alt={m.name} style={{width:'100%', height:'100%', objectFit:'cover'}}/> : <><video src={m.url} style={{width:'100%', height:'100%', objectFit:'cover'}}/><div style={{fontSize:11, color:'#777'}}><Film size={10}/> VIDEO</div></>}</div>
+              <div style={{padding:4, fontSize:11, textAlign:'center', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', background: selectedMediaIds.includes(m.id) ? '#f0eefc' : '#fff', color: selectedMediaIds.includes(m.id) ? '#6558d6' : '#333'}}>{selectedMediaIds.includes(m.id) ? '✓ ' : ''}{m.name}</div>
+            </div>)}
+          </div> : <span style={{fontSize:13, color:'#777'}}>Thư viện trống — hãy nhập media trước</span>}
+        </div>}
+        {selectedMediaIds.length > 0 && <div style={{fontSize:12, color:'#6558d6', marginTop:4, display:'flex', alignItems:'center', gap:6, flexWrap:'wrap'}}>
+          <span>Đã chọn {selectedMediaIds.length} ảnh để đăng kèm</span>
+          {selectedImages.slice(0,4).map(m => <img key={m.id} src={m.url} alt={m.name} style={{width:28, height:28, objectFit:'cover', borderRadius:4, border:'1px solid #e8e8ed'}}/>)}
+          {selectedImages.length > 4 && <span>+{selectedImages.length - 4}</span>}
+        </div>}
+      </div>
+      {err && <div className="error-box" style={{marginTop:8}}>{err}</div>}
+      {msg && <div className="desktop-notice" style={{background:'#eef7ee', borderColor:'#cde9cd', color:'#2e6b2e', marginTop:8, padding:8}}><CircleCheck size={14}/><span>{msg}</span></div>}
+      <div className="publish-footer">
+        {onCancel && <button className="outline" onClick={onCancel} disabled={busy} style={{height:36}}><X size={14}/> Đóng</button>}
+        <button className="primary" onClick={handlePublish} disabled={busy || !pageId || !message.trim()} style={{height:36}}><Send size={14}/> Đăng ngay</button>
       </div>
     </div>
   )
 }
-
-const CONTENT_STATUS_LABELS = { draft: 'Nháp', approved: 'Đã duyệt', archived: 'Lưu trữ' }
-const contentStatusLabel = (s) => CONTENT_STATUS_LABELS[s] || s
 
 const resolveStyleLabel = (styles, value) => {
   const raw = value == null ? '' : String(value)
@@ -2486,21 +2536,7 @@ function App() {
 
   useVisiblePolling(loadLocal, 0, Boolean(desktop))
 
-  return <div className="app-shell">
-    <aside className="sidebar">
-      <div className="brand"><div className="brand-mark"><WandSparkles size={21}/></div><span>FlowPost <b>AI</b></span></div>
-      <nav>{nav.map(([name, Icon]) => <button className={active === name ? 'active' : ''} onClick={() => setActive(name)} key={name}><Icon size={19}/><span>{name}</span>{name === 'Kho nội dung' && <em>{contentCount}</em>}</button>)}</nav>
-      <div className="sidebar-bottom">
-        <button onClick={() => setActive('Cài đặt')} className={active === 'Cài đặt' ? 'active' : ''}><Settings size={19}/><span>Cài đặt</span></button>
-        <SettingsStatus/>
-        <div className="profile"><div className="avatar">NT</div><div><strong>Nguyễn Xuân Thoán</strong><span>Tác giả</span></div></div>
-      </div>
-    </aside>
-
-    <main>
-      <header><div className="search"><Search size={18}/><input spellCheck={false} aria-label="Tìm kiếm" placeholder="Tìm kiếm nội dung, bài viết..." disabled style={{opacity:0.6}}/></div><div className="head-actions"><button className="primary" onClick={createPost}><Plus size={19}/> Tạo nội dung mới</button></div></header>
-      <div className="content">
-        {active === 'AI Content' ? <AiContentPage/> : active === 'Kho nội dung' ? <ContentWarehousePage resolveStyleName={resolveStyleName}/> : active === 'Thư viện media' ? <MediaLibrary/> : active === 'Lịch đăng bài' ? <SchedulePage/> : active === 'Lịch AI content' ? <AutoSchedulePage desktop={desktop} /> : active === 'Báo cáo' ? <ReportPage desktop={desktop} /> : active === 'Cài đặt' ? <SettingsPage/> : <>
+  const dashboardView = (<>
         <section className="welcome"><div><p>{today}</p><h1>{getGreeting()}</h1><div className="welcome-sub">Hôm nay bạn có <b>{dashboardScheduled} bài viết</b> đang chờ được đăng.</div></div><button className="outline" onClick={()=>setActive('Lịch đăng bài')}><CalendarDays size={17}/> Xem lịch đăng bài</button></section>
 
         <section className="stats-grid">
@@ -2524,7 +2560,31 @@ function App() {
           {graphErr && <div className="error-box" style={{marginTop:8}}>{graphErr}</div>}
           <div className="table-wrap"><table><thead><tr><th>NỘI DUNG</th><th>TRANG</th><th>THỜI GIAN</th><th>LOẠI</th><th>TRẠNG THÁI</th><th>TIẾP CẬN</th><th>TƯƠNG TÁC</th><th></th></tr></thead><tbody>{dashboardRecent.length ? dashboardRecent.map((p, i) => <tr key={p.title + i} onMouseEnter={()=>setHoveredRecent(i)} onMouseLeave={()=>setHoveredRecent(null)} style={{position:'relative'}}><td><div className="post-title"><div className={`thumb thumb${i+1}`}>{i === 0 ? '☀️' : i === 1 ? '“' : '▶'}</div><strong>{p.title}</strong></div></td><td><div className="page"><i style={{background:p.color}}>{p.initials}</i>{p.page}</div></td><td>{p.date}</td><td><span className="type">{p.type}</span></td><td><span className={p.pending ? 'status pending' : 'status success'}>{p.pending ? <Clock3 size={13}/> : <CircleCheck size={13}/>} {p.pending ? 'Đang xử lý' : p.status}</span></td><td style={{position:'relative'}}><strong>{p.reach}</strong>{hoveredRecent===i && p.tooltipData && p.tooltipData.impressions!=='—' && <div style={{position:'absolute', top:'100%', left:0, background:'#fff', border:'1px solid #e9e9ee', borderRadius:8, boxShadow:'0 8px 24px #2222', padding:10, zIndex:10, minWidth:240}}><div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 12px', fontSize:13}}><span style={{color:'#777'}}>Impressions</span><b>{p.tooltipData.impressions}</b><span style={{color:'#777'}}>Unique</span><b>{p.tooltipData.unique}</b><span style={{color:'#777'}}>Engaged</span><b>{p.tooltipData.engaged}</b><span style={{color:'#777'}}>Clicks</span><b>{p.tooltipData.clicks}</b><span style={{color:'#777'}}>Reactions</span><b style={{wordBreak:'break-all'}}>{p.tooltipData.reactions}</b><span style={{color:'#777'}}>VideoViews</span><b>{p.tooltipData.videoViews}</b></div></div>}</td><td style={{position:'relative'}}><div className="engage"><span><Heart size={14}/> {p.likes || '—'}</span><span><MessageCircle size={14}/> {p.comments || '—'}</span></div>{hoveredRecent===i && p.tooltipData && p.tooltipData.impressions!=='—' && <div style={{position:'absolute', top:'100%', right:0, background:'#fff', border:'1px solid #e9e9ee', borderRadius:8, boxShadow:'0 8px 24px #2222', padding:10, zIndex:10, minWidth:240}}><div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'6px 12px', fontSize:13}}><span style={{color:'#777'}}>Impressions</span><b>{p.tooltipData.impressions}</b><span style={{color:'#777'}}>Unique</span><b>{p.tooltipData.unique}</b><span style={{color:'#777'}}>Engaged</span><b>{p.tooltipData.engaged}</b><span style={{color:'#777'}}>Clicks</span><b>{p.tooltipData.clicks}</b><span style={{color:'#777'}}>Reactions</span><b style={{wordBreak:'break-all'}}>{p.tooltipData.reactions}</b><span style={{color:'#777'}}>VideoViews</span><b>{p.tooltipData.videoViews}</b></div></div>}</td><td><button className="row-more" aria-label="Thao tác"><MoreHorizontal size={18}/></button></td></tr>) : <tr><td colSpan={8} style={{textAlign:'center', padding:20, color:'#777', fontSize:14}}>Chưa có bài viết — hãy tạo nội dung ở AI Content</td></tr>}</tbody></table></div>
         </section>
-        </>}
+  </>)
+  return <div className="app-shell">
+    <aside className="sidebar">
+      <div className="brand"><div className="brand-mark"><WandSparkles size={21}/></div><span>FlowPost <b>AI</b></span></div>
+      <nav>{nav.map(([name, Icon]) => <button className={active === name ? 'active' : ''} onClick={() => setActive(name)} key={name}><Icon size={19}/><span>{name}</span>{name === 'Kho nội dung' && <em>{contentCount}</em>}</button>)}</nav>
+      <div className="sidebar-bottom">
+        <button onClick={() => setActive('Cài đặt')} className={active === 'Cài đặt' ? 'active' : ''}><Settings size={19}/><span>Cài đặt</span></button>
+        <SettingsStatus/>
+        <div className="profile"><div className="avatar">NT</div><div><strong>Nguyễn Xuân Thoán</strong><span>Tác giả</span></div></div>
+      </div>
+    </aside>
+
+    <main>
+      <header><div className="search"><Search size={18}/><input spellCheck={false} aria-label="Tìm kiếm" placeholder="Tìm kiếm nội dung, bài viết..." disabled style={{opacity:0.6}}/></div><div className="head-actions"><button className="primary" onClick={createPost}><Plus size={19}/> Tạo nội dung mới</button></div></header>
+      <div className="content">
+        {active === 'AI Content' ? <AiContentPage/>
+         : active === 'Kho nội dung' ? <ContentWarehousePage resolveStyleName={resolveStyleName}/>
+         : active === 'Thư viện media' ? <MediaLibrary/>
+         : active === 'Lịch đăng bài' ? <SchedulePage/>
+         : active === 'Lịch AI content' ? <AutoSchedulePage desktop={desktop}/>
+         : active === 'Báo cáo' ? <ReportPage desktop={desktop}/>
+         : active === 'Đăng bài' ? <PublishPage desktop={desktop}/>
+         : active === 'Cài đặt' ? <SettingsPage/>
+         : active === 'Tổng quan' ? dashboardView
+         : dashboardView}
         <footer><span>© 2026 FlowPost AI</span><span>Trạng thái hệ thống <i/> Hoạt động ổn định</span></footer>
       </div>
     </main>

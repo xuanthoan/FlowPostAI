@@ -2,6 +2,27 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-25 — Trang Đăng bài riêng
+
+### Added
+- `src/App.jsx` — `PublishForm` dùng chung (danh sách Trang, chọn nội dung từ Kho nội dung, textarea + đếm ký tự, picker ảnh tối đa 10, nút đăng), `PublishPage` cho mục sidebar `Đăng bài`, và `dashboardView` tách nguyên văn khỏi nhánh route mặc định.
+- `e2e/publish-page.spec.ts` — 8 test mock: trang riêng không gọi Graph, dashboard `Tổng quan` giữ nguyên, danh sách Trang chỉ tải khi bấm nút, Kho nội dung tải theo yêu cầu và cache, validate nút đăng, payload `publish_content` + thông báo thành công + không tự đóng trang, giới hạn 10 ảnh, và modal trong `Cài đặt` không gọi lại `list_facebook_pages`.
+- `src/styles.css` — style `.publish-page`/`.publish-panel`/`.publish-form`/`.publish-picker`/`.publish-footer`.
+- `README.md` — một bullet mô tả `Đăng bài` là trang riêng, tải danh sách Trang theo yêu cầu, nội dung lấy từ Kho nội dung là dữ liệu cục bộ, tối đa 10 ảnh.
+
+### Changed
+- `src/App.jsx` — route `active === 'Đăng bài'` trả `PublishPage`, `active === 'Tổng quan'` trả `dashboardView`; `PublishModal` chỉ còn là vỏ modal bọc `PublishForm` và nhận `initialPages` từ `SettingsPage`, bỏ `useEffect` gọi `list_facebook_pages` khi mở modal. Nút trong `Cài đặt` → `Kết nối` đổi nhãn `Đăng bài` → `Đăng ngay`; nhãn sidebar giữ nguyên.
+- Không đổi backend, IPC, schema hay tham số `publish_content`; không thêm dependency/icon/router.
+
+### Verified
+- `npm run lint` — exit 0.
+- `npm run build` — success (Vite 8.2.2).
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/publish-page.spec.ts` — 8 passed / 0 failed.
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts` — 52 passed / 0 failed (44 test cũ + 8 test mới).
+
+### Unverified
+- Chưa chạy với Facebook Graph thật (đăng bài thật, tải danh sách Trang thật) vì môi trường không có token Facebook; cần kiểm tra thủ công trên ứng dụng desktop có token.
+
 ## [Unreleased] - 2026-10-25 — Báo cáo theo tháng và khoảng ngày tự chọn
 
 ### Added
