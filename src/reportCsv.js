@@ -32,7 +32,7 @@ export function buildReportCsv(report) {
   const lines = [
     ['Trang', safe.pageName || safe.pageId || ''],
     ['Page ID', safe.pageId || ''],
-    ['Khoảng thời gian', `${Number(safe.days) || 0} ngày`],
+    ['Khoảng thời gian', safe.rangeLabel || `${Number(safe.days) || 0} ngày`],
     ['Từ (ISO)', isoFromSeconds(safe.since)],
     ['Đến (ISO)', isoFromSeconds(safe.until)],
     ['Tổng số bài', Number(safe.postCount) || 0],
@@ -81,5 +81,9 @@ export function reportCsvFileName(report, now = new Date()) {
   const days = Number(report?.days) || 0
   const pad = value => String(value).padStart(2, '0')
   const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+  if (report?.rangeKey === 'month') return `bao-cao-${slug}-thang-nay-${stamp}.csv`
+  if (report?.rangeKey === 'custom' && report?.fromDate && report?.toDate) {
+    return `bao-cao-${slug}-tu-${report.fromDate}-den-${report.toDate}-${stamp}.csv`
+  }
   return `bao-cao-${slug}-${days}ngay-${stamp}.csv`
 }

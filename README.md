@@ -75,11 +75,12 @@ FlowPost AI dùng token do bạn tự tạo và dán vào ứng dụng. Token c�
 
 ## Báo cáo hiệu suất và xuất CSV/PDF
 
-- Mở sidebar `Báo cáo`, chọn `Trang` và khoảng `7 ngày qua` hoặc `30 ngày qua`, rồi bấm `Tải báo cáo`. Backend đọc bài viết trong cửa sổ thời gian cuốn theo ngày bằng `GET /{page_id}/posts` với `since`/`until` và Page token đã lưu.
+- Mở sidebar `Báo cáo`, chọn `Trang` và khoảng thời gian (`7 ngày qua`, `30 ngày qua`, `Tháng này` hoặc `Tùy chọn`), rồi bấm `Tải báo cáo`. Backend đọc bài viết bằng `GET /{page_id}/posts` với `since`/`until` và Page token đã lưu.
+- `Tháng này` lấy từ 00:00 ngày 1 của tháng hiện tại đến thời điểm hiện tại theo giờ địa phương (month-to-date). `Tùy chọn` nhận `Từ ngày`/`Đến ngày` theo lịch địa phương và bao gồm cả hai đầu; tối đa 366 ngày và không cho chọn ngày trong tương lai. Hai khoảng này dùng lệnh `get_page_report_range`.
 - Trang hiển thị `Tổng số bài`, `Tổng tương tác`, `Cảm xúc`, `Bình luận / Chia sẻ`. Công thức: **Tương tác = cảm xúc + bình luận + chia sẻ**, lấy từ `likes.summary.total_count`, `comments.summary.total_count` và `shares.count` của các bài đã tải. Số này khác với insights ở Dashboard (impressions/engaged/clicks) và chỉ là số liệu công khai.
 - Giới hạn báo cáo: tối đa 100 bài/request và 20 trang (2.000 bài). Nếu còn cursor ở trang cuối, UI/CSV ghi cảnh báo đã đạt giới hạn; nếu một bài thiếu summary cảm xúc/bình luận, tổng được tính với 0 và ghi cảnh báo `partial` để không hiểu sai là số thật đầy đủ.
-- `Xuất CSV` mở hộp thoại lưu tệp native, ghi UTF-8 có BOM, tên dạng `bao-cao-{slug}-{days}ngay-{YYYY-MM-DD}.csv`, và trung hòa công thức bảng tính ở đầu ô. `Xuất PDF` gọi hộp thoại in của hệ thống; chọn **Save as PDF** để lưu. Hai nút này chỉ xuất báo cáo đã tải và bị tắt khi bộ lọc thay đổi.
-- Quy tắc on-demand: mở trang, chuyển tab, đổi Trang/khoảng ngày hoặc xuất CSV/PDF **không gọi Graph**. Chỉ `Tải báo cáo` (và `Tải lại danh sách Trang` để làm mới danh sách Trang) mới gọi Facebook.
+- `Xuất CSV` mở hộp thoại lưu tệp native, ghi UTF-8 có BOM, tên dạng `bao-cao-{slug}-{days}ngay-{YYYY-MM-DD}.csv` cho 7/30 ngày, `bao-cao-{slug}-thang-nay-{YYYY-MM-DD}.csv` cho `Tháng này`, và `bao-cao-{slug}-tu-{from}-den-{to}-{YYYY-MM-DD}.csv` cho `Tùy chọn`; trung hòa công thức bảng tính ở đầu ô. `Xuất PDF` gọi hộp thoại in của hệ thống; chọn **Save as PDF** để lưu. Hai nút này chỉ xuất báo cáo đã tải và bị tắt khi bộ lọc thay đổi.
+- Quy tắc on-demand: mở trang, chuyển tab, đổi Trang/khoảng thời gian (kể cả đổi `Từ ngày`/`Đến ngày` của `Tùy chọn`) hoặc xuất CSV/PDF **không gọi Graph**. Chỉ `Tải báo cáo` (và `Tải lại danh sách Trang` để làm mới danh sách Trang) mới gọi Facebook. Ngày `Tùy chọn` không hợp lệ được chặn ngay trên UI, trước khi tải danh sách Trang.
 - Quyền cần cho báo cáo: `pages_show_list` (danh sách Trang), `pages_read_engagement` và `pages_read_user_content` (bài viết + summary cảm xúc/bình luận/chia sẻ). Không cần `read_insights` cho trang báo cáo này.
 
 ## Tạo ảnh minh hoạ bằng AI

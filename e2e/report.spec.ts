@@ -73,6 +73,64 @@ window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
       ],
     };
   }
+  if (cmd === 'get_page_report_range') {
+    window.__GRAPH_CALLS__.push(cmd);
+    window.__REPORT_ARGS__.push(args || null);
+    const pageId = args?.pageId || '';
+    const rangeKey = args?.rangeKey || 'month';
+    const from = args?.fromDate || '';
+    const to = args?.toDate || '';
+    const fmt = value => {
+      const p = String(value || '').split('-');
+      return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : '';
+    };
+    const span = (a, b) => {
+      const pa = String(a || '').split('-').map(Number);
+      const pb = String(b || '').split('-').map(Number);
+      if (pa.length !== 3 || pb.length !== 3) return 0;
+      return Math.round((Date.UTC(pb[0], pb[1] - 1, pb[2]) - Date.UTC(pa[0], pa[1] - 1, pa[2])) / 86400000) + 1;
+    };
+    const days = rangeKey === 'month' ? 25 : span(from, to);
+    const label = rangeKey === 'month' ? 'Tháng này' : 'Tùy chọn: ' + fmt(from) + ' – ' + fmt(to);
+    return {
+      pageId,
+      pageName: args?.pageName || (pageId === 'page-2' ? 'Daily Motivation' : 'Sống Tích Cực'),
+      days,
+      since: 1790000000,
+      until: 1790000000 + days * 86400,
+      postCount: 2,
+      totalReactions: 40,
+      totalComments: 20,
+      totalShares: 10,
+      totalInteractions: 70,
+      partial: false,
+      truncated: false,
+      rangeKey,
+      rangeLabel: label,
+      fromDate: rangeKey === 'custom' ? from : null,
+      toDate: rangeKey === 'custom' ? to : null,
+      posts: [
+        {
+          id: pageId + '_1',
+          message: 'Xin chào, "báo cáo"\\nDòng 2',
+          createdTime: '2026-10-20T08:00:00+0000',
+          permalinkUrl: 'https://example.test/p/1',
+          reactions: 30,
+          comments: 15,
+          shares: 5,
+        },
+        {
+          id: pageId + '_2',
+          message: 'Bài viết thường',
+          createdTime: '2026-10-19T08:00:00+0000',
+          permalinkUrl: 'https://example.test/p/2',
+          reactions: 10,
+          comments: 5,
+          shares: 5,
+        },
+      ],
+    };
+  }
   if (cmd === 'save_report_csv') {
     window.__SAVED_CSV__ = { defaultName: args?.defaultName, contents: args?.contents };
     return 'C:/tmp/bao-cao.csv';
@@ -184,5 +242,58 @@ test.describe('Facebook report mock E2E', () => {
     await expect.poll(() => page.evaluate(() => (window as any).__PRINT_CALLED__)).toBe(true);
     await expect(page.locator('.report-print-hint')).toHaveText('Chọn "Save as PDF" trong hộp thoại in để lưu PDF.');
     expect(await graphCalls(page)).toEqual(before);
+  });
+
+  test('month range loads month-to-date only on click and never on filter change', async ({ page }) => {
+    await openReport(page);
+    expect(await graphCalls(page)).toEqual([]);
+
+    await page.getByLabel('Khoảng thời gian').selectOption('month');
+    expect(await graphCalls(page)).toEqual([]);
+    await expect(page.getByRole('button', { name: 'Xuất CSV', exact: true })).toBeDisabled();
+
+    await loadReport(page);
+    expect(await graphCalls(page)).toEqual(['list_facebook_pages', 'get_page_report_range']);
+    const args: any[] = await page.evaluate(() => (window as any).__REPORT_ARGS__);
+    expect(args[0]).toMatchObject({ pageId: 'page-2', rangeKey: 'month' });
+    await expect(page.locator('.report-period')).toContainText('Tháng này');
+    await expect(page.getByRole('button', { name: 'Xuất CSV', exact: true })).toBeEnabled();
+
+    await page.getByLabel('Khoảng thời gian').selectOption('30');
+    await expect(page.getByText('Bộ lọc đã thay đổi — bấm Tải báo cáo để cập nhật')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Xuất CSV', exact: true })).toBeDisabled();
+    expect(await graphCalls(page)).toHaveLength(2);
+  });
+
+  test('custom range validates locally and loads the chosen dates', async ({ page }) => {
+    await openReport(page);
+    await page.getByLabel('Khoảng thời gian').selectOption('custom');
+    expect(await graphCalls(page)).toEqual([]);
+
+    await page.getByLabel('Từ ngày').fill('2026-10-20');
+    await page.getByLabel('Đến ngày').fill('2026-10-01');
+    await expect(page.getByRole('button', { name: 'Tải báo cáo', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Xuất CSV', exact: true })).toBeDisabled();
+    expect(await graphCalls(page)).toEqual([]);
+
+    await page.getByLabel('Từ ngày').fill('2026-10-01');
+    await page.getByLabel('Đến ngày').fill('2026-10-20');
+    await loadReport(page);
+    expect(await graphCalls(page)).toEqual(['list_facebook_pages', 'get_page_report_range']);
+    const args: any[] = await page.evaluate(() => (window as any).__REPORT_ARGS__);
+    expect(args[0]).toMatchObject({
+      pageId: 'page-2',
+      rangeKey: 'custom',
+      fromDate: '2026-10-01',
+      toDate: '2026-10-20',
+    });
+    await expect(page.locator('.report-period')).toContainText('Tùy chọn: 01/10/2026 – 20/10/2026');
+
+    await page.getByRole('button', { name: 'Xuất CSV', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (window as any).__SAVED_CSV__?.defaultName || '')).toBeTruthy();
+    const saved: any = await page.evaluate(() => (window as any).__SAVED_CSV__);
+    expect(saved.defaultName).toMatch(/^bao-cao-daily-motivation-tu-2026-10-01-den-2026-10-20-\d{4}-\d{2}-\d{2}\.csv$/);
+    expect(saved.contents).toContain('Khoảng thời gian,Tùy chọn: 01/10/2026 – 20/10/2026');
+    expect(await graphCalls(page)).toHaveLength(2);
   });
 });

@@ -2,6 +2,30 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-25 — Báo cáo theo tháng và khoảng ngày tự chọn
+
+### Added
+- `src-tauri/src/facebook.rs` — `ReportRange`/`report_custom_range`/`local_seconds`: resolve `Tháng này` (month-to-date theo giờ địa phương) và khoảng `Tùy chọn` bao gồm cả hai đầu, tối đa 366 ngày, không cho ngày tương lai. `PageReport` thêm `rangeKey`/`rangeLabel`/`fromDate`/`toDate`; thêm lệnh `get_page_report_range`. Báo cáo 7/30 ngày dùng chung core `report_with_range` nhưng giữ nguyên hành vi.
+- `src-tauri/src/lib.rs` — đăng ký `facebook::get_page_report_range`.
+- `src/App.jsx` — `ReportPage` thêm lựa chọn `Tháng này`/`Tùy chọn`, hai ô `Từ ngày`/`Đến ngày`, validate ngày cục bộ trước khi gọi Graph, stale/disable xuất theo đúng bộ lọc đã tải.
+- `src/reportCsv.js` — summary dùng `rangeLabel`; tên CSV dạng `...-thang-nay-...` và `...-tu-{from}-den-{to}-...`.
+- `src/styles.css` — style cho `input[type=date]` trong `.report-controls`.
+- `e2e/report.spec.ts` — mock `get_page_report_range` và 2 test cho tháng/tùy chọn.
+- `README.md` — hướng dẫn `Tháng này`, `Tùy chọn`, giới hạn 366 ngày/không ngày tương lai, tên CSV và quy tắc không gọi Graph khi đổi bộ lọc.
+
+### Changed
+- Báo cáo 7/30 ngày vẫn dùng lệnh `get_page_report`, kết quả và test cũ; dashboard quick report (`loadGraph`) và `e2e/ai.spec.ts` không đổi.
+
+### Verified
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib` — 352 passed / 0 failed (346 test cũ + 6 test range mới).
+- `npm exec -- eslint .` — exit 0.
+- `npm run build` — success (Vite 8.2.2).
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/report.spec.ts` — 6 passed / 0 failed.
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts` — 44 passed / 0 failed.
+
+### Unverified
+- Chưa chạy với Facebook Graph thật hoặc hộp thoại in/Save as PDF thật vì môi trường không có token Facebook thật; cần kiểm tra thủ công trên ứng dụng desktop có token.
+
 ## [Unreleased] - 2026-10-25 — Trang Báo cáo đầy đủ + xuất CSV/PDF
 
 ### Added

@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::OnceLock;
 use tauri::{AppHandle, Runtime};
@@ -80,6 +80,10 @@ pub struct PageReport {
     pub partial: bool,
     pub truncated: bool,
     pub posts: Vec<ReportPost>,
+    pub range_key: String,
+    pub range_label: String,
+    pub from_date: Option<String>,
+    pub to_date: Option<String>,
 }
 
 /// Internal shape of a `/me/accounts` entry. The page token is cached into the
@@ -825,6 +829,95 @@ fn report_window(now: DateTime<Utc>, days: u32) -> Result<(i64, i64), String> {
     Ok((until - i64::from(days) * 86_400, until))
 }
 
+/// Cửa sổ thời gian đã resolve cho báo cáo theo tháng/khoảng tự chọn. Tách khỏi
+/// network để test được bằng đồng hồ cố định.
+#[derive(Debug)]
+struct ReportRange {
+    since: i64,
+    until: i64,
+    days: u32,
+    key: &'static str,
+    label: String,
+    from_date: Option<String>,
+    to_date: Option<String>,
+}
+
+/// Đổi ngày + giờ địa phương sang epoch giây. Trả lỗi nếu múi giờ địa phương
+/// không xác định được (ví dụ giờ bị bỏ qua khi đổi DST).
+fn local_seconds(date: NaiveDate, hour: u32, min: u32, sec: u32) -> Result<i64, String> {
+    Local
+        .from_local_datetime(&date.and_hms_opt(hour, min, sec).unwrap())
+        .earliest()
+        .map(|dt| dt.timestamp())
+        .ok_or_else(|| "Không xác định được múi giờ địa phương.".to_string())
+}
+
+/// Resolve `Tháng này` (month-to-date theo giờ địa phương) hoặc khoảng ngày tự
+/// chọn (bao gồm cả hai đầu). Hàm thuần: nhận `now` từ ngoài để test ổn định.
+fn report_custom_range(
+    now: DateTime<Local>,
+    range_key: &str,
+    from_date: Option<&str>,
+    to_date: Option<&str>,
+) -> Result<ReportRange, String> {
+    if range_key != "month" && range_key != "custom" {
+        return Err("Lệnh này chỉ hỗ trợ Tháng này hoặc Tùy chọn.".to_string());
+    }
+    if range_key == "month" {
+        let today = now.date_naive();
+        let first = NaiveDate::from_ymd_opt(today.year(), today.month(), 1)
+            .ok_or_else(|| "Ngày không hợp lệ. Dùng định dạng YYYY-MM-DD.".to_string())?;
+        return Ok(ReportRange {
+            since: local_seconds(first, 0, 0, 0)?,
+            until: now.timestamp(),
+            days: today.day(),
+            key: "month",
+            label: "Tháng này".to_string(),
+            from_date: None,
+            to_date: None,
+        });
+    }
+
+    let raw_from = from_date.map(str::trim).unwrap_or("");
+    let raw_to = to_date.map(str::trim).unwrap_or("");
+    if raw_from.is_empty() || raw_to.is_empty() {
+        return Err("Vui lòng chọn Từ ngày và Đến ngày.".to_string());
+    }
+    let from = NaiveDate::parse_from_str(raw_from, "%Y-%m-%d")
+        .map_err(|_| "Ngày không hợp lệ. Dùng định dạng YYYY-MM-DD.".to_string())?;
+    let to = NaiveDate::parse_from_str(raw_to, "%Y-%m-%d")
+        .map_err(|_| "Ngày không hợp lệ. Dùng định dạng YYYY-MM-DD.".to_string())?;
+    if from > to {
+        return Err("Từ ngày phải trước hoặc bằng Đến ngày.".to_string());
+    }
+    let today = now.date_naive();
+    if from > today || to > today {
+        return Err("Không thể chọn ngày trong tương lai.".to_string());
+    }
+    let days = (to - from).num_days() + 1;
+    if days > 366 {
+        return Err("Khoảng thời gian tối đa là 366 ngày.".to_string());
+    }
+    let until = if to == today {
+        now.timestamp()
+    } else {
+        local_seconds(to, 23, 59, 59)?
+    };
+    Ok(ReportRange {
+        since: local_seconds(from, 0, 0, 0)?,
+        until,
+        days: days as u32,
+        key: "custom",
+        label: format!(
+            "Tùy chọn: {} – {}",
+            from.format("%d/%m/%Y"),
+            to.format("%d/%m/%Y")
+        ),
+        from_date: Some(from.to_string()),
+        to_date: Some(to.to_string()),
+    })
+}
+
 /// Tên Trang chỉ để hiển thị/ghi CSV: bỏ ký tự điều khiển và giới hạn 200 ký tự.
 fn normalize_report_page_name(page_name: Option<String>) -> Option<String> {
     let cleaned = page_name?
@@ -945,20 +1038,20 @@ fn report_error_message(failure: &GraphFailure) -> String {
     }
 }
 
-async fn report_with(
+async fn report_with_range(
     base: &str,
     token: &str,
     page_id: &str,
     page_name: Option<String>,
-    days: u32,
+    range: ReportRange,
     max_pages: usize,
 ) -> Result<PageReport, GraphFailure> {
     validate_page_id(page_id)
         .map_err(|e| GraphFailure::local(GraphFailureKind::InvalidParam, e))?;
-    let (since, until) = report_window(Utc::now(), days)
-        .map_err(|e| GraphFailure::local(GraphFailureKind::InvalidParam, e))?;
     let page_id = page_id.trim().to_string();
     let page_name = normalize_report_page_name(page_name);
+    let since = range.since;
+    let until = range.until;
 
     let mut posts = Vec::new();
     let mut partial = false;
@@ -1014,7 +1107,7 @@ async fn report_with(
     Ok(PageReport {
         page_id,
         page_name,
-        days,
+        days: range.days,
         since,
         until,
         post_count: posts.len(),
@@ -1025,7 +1118,37 @@ async fn report_with(
         partial,
         truncated,
         posts,
+        range_key: range.key.to_string(),
+        range_label: range.label,
+        from_date: range.from_date,
+        to_date: range.to_date,
     })
+}
+
+/// Wrapper tương thích cho báo cáo 7/30 ngày. `Utc::now()` chỉ được gọi đúng
+/// một lần ở đây để cửa sổ 7/30 ngày giữ nguyên hành vi cũ.
+async fn report_with(
+    base: &str,
+    token: &str,
+    page_id: &str,
+    page_name: Option<String>,
+    days: u32,
+    max_pages: usize,
+) -> Result<PageReport, GraphFailure> {
+    validate_page_id(page_id)
+        .map_err(|e| GraphFailure::local(GraphFailureKind::InvalidParam, e))?;
+    let (since, until) = report_window(Utc::now(), days)
+        .map_err(|e| GraphFailure::local(GraphFailureKind::InvalidParam, e))?;
+    let range = ReportRange {
+        since,
+        until,
+        days,
+        key: if days == 7 { "7d" } else { "30d" },
+        label: format!("{} ngày", days),
+        from_date: None,
+        to_date: None,
+    };
+    report_with_range(base, token, page_id, page_name, range, max_pages).await
 }
 
 #[tauri::command]
@@ -1047,6 +1170,38 @@ pub async fn get_page_report<R: Runtime>(
         &page_id,
         page_name,
         days,
+        REPORT_MAX_PAGES,
+    )
+    .await
+    .map_err(|e| report_error_message(&e))
+}
+
+#[tauri::command]
+pub async fn get_page_report_range<R: Runtime>(
+    app: AppHandle<R>,
+    page_id: String,
+    page_name: Option<String>,
+    range_key: String,
+    from_date: Option<String>,
+    to_date: Option<String>,
+) -> Result<PageReport, String> {
+    validate_page_id(&page_id)?;
+    let range = report_custom_range(
+        Local::now(),
+        range_key.trim(),
+        from_date.as_deref(),
+        to_date.as_deref(),
+    )?;
+    let access_token = resolve_token_for_page(&app, page_id.trim())?;
+    if access_token.trim().is_empty() {
+        return Err("Không tìm thấy Page/User token, vui lòng Tải Trang lại".into());
+    }
+    report_with_range(
+        graph_base().as_str(),
+        &access_token,
+        &page_id,
+        page_name,
+        range,
         REPORT_MAX_PAGES,
     )
     .await
@@ -1877,6 +2032,110 @@ mod tests {
         assert_eq!(until30 - since30, 30 * 86_400);
     }
 
+    /// Đồng hồ cố định theo giờ địa phương để test range không phụ thuộc TZ.
+    fn fixed_local_now() -> DateTime<Local> {
+        Local
+            .with_ymd_and_hms(2026, 10, 25, 15, 30, 0)
+            .single()
+            .unwrap()
+    }
+
+    #[test]
+    fn report_custom_range_month_starts_at_local_first_day() {
+        let now = fixed_local_now();
+        let range = report_custom_range(now, "month", None, None).unwrap();
+        let first = NaiveDate::from_ymd_opt(2026, 10, 1).unwrap();
+        assert_eq!(range.since, local_seconds(first, 0, 0, 0).unwrap());
+        assert_eq!(range.until, now.timestamp());
+        assert_eq!(range.days, 25);
+        assert_eq!(range.key, "month");
+        assert_eq!(range.label, "Tháng này");
+        assert_eq!(range.from_date, None);
+        assert_eq!(range.to_date, None);
+    }
+
+    #[test]
+    fn report_custom_range_custom_is_inclusive() {
+        let now = fixed_local_now();
+        let range = report_custom_range(now, "custom", Some("2026-10-01"), Some("2026-10-05"))
+            .unwrap();
+        let from = NaiveDate::from_ymd_opt(2026, 10, 1).unwrap();
+        let to = NaiveDate::from_ymd_opt(2026, 10, 5).unwrap();
+        assert_eq!(range.since, local_seconds(from, 0, 0, 0).unwrap());
+        assert_eq!(range.until, local_seconds(to, 23, 59, 59).unwrap());
+        assert_eq!(range.days, 5);
+        assert_eq!(range.key, "custom");
+        assert_eq!(range.label, "Tùy chọn: 01/10/2026 – 05/10/2026");
+        assert_eq!(range.from_date.as_deref(), Some("2026-10-01"));
+        assert_eq!(range.to_date.as_deref(), Some("2026-10-05"));
+    }
+
+    #[test]
+    fn report_custom_range_caps_today_end_to_now() {
+        let now = fixed_local_now();
+        let range =
+            report_custom_range(now, "custom", Some("2026-10-25"), Some("2026-10-25")).unwrap();
+        assert_eq!(range.since, local_seconds(now.date_naive(), 0, 0, 0).unwrap());
+        assert_eq!(range.until, now.timestamp());
+        assert_eq!(range.days, 1);
+    }
+
+    #[test]
+    fn report_custom_range_rejects_bad_input() {
+        let now = fixed_local_now();
+        assert_eq!(
+            report_custom_range(now, "7d", None, None).unwrap_err(),
+            "Lệnh này chỉ hỗ trợ Tháng này hoặc Tùy chọn."
+        );
+        for (from, to) in [
+            (None, None),
+            (Some("   "), Some("2026-10-05")),
+            (Some("2026-10-01"), None),
+        ] {
+            assert_eq!(
+                report_custom_range(now, "custom", from, to).unwrap_err(),
+                "Vui lòng chọn Từ ngày và Đến ngày."
+            );
+        }
+        for (from, to) in [
+            (Some("2026/10/01"), Some("2026-10-05")),
+            (Some("2026-10-01"), Some("2026-13-05")),
+        ] {
+            assert_eq!(
+                report_custom_range(now, "custom", from, to).unwrap_err(),
+                "Ngày không hợp lệ. Dùng định dạng YYYY-MM-DD."
+            );
+        }
+        assert_eq!(
+            report_custom_range(now, "custom", Some("2026-10-05"), Some("2026-10-01"))
+                .unwrap_err(),
+            "Từ ngày phải trước hoặc bằng Đến ngày."
+        );
+        for (from, to) in [
+            (Some("2026-10-26"), Some("2026-10-27")),
+            (Some("2026-10-24"), Some("2026-10-26")),
+        ] {
+            assert_eq!(
+                report_custom_range(now, "custom", from, to).unwrap_err(),
+                "Không thể chọn ngày trong tương lai."
+            );
+        }
+        assert_eq!(
+            report_custom_range(now, "custom", Some("2025-10-20"), Some("2026-10-21"))
+                .unwrap_err(),
+            "Khoảng thời gian tối đa là 366 ngày."
+        );
+    }
+
+    #[test]
+    fn report_custom_range_accepts_366_days() {
+        let now = fixed_local_now();
+        let range = report_custom_range(now, "custom", Some("2025-10-20"), Some("2026-10-20"))
+            .unwrap();
+        assert_eq!(range.days, 366);
+        assert_eq!(range.key, "custom");
+    }
+
     #[tokio::test]
     async fn report_rejects_other_day_ranges() {
         // Cổng 1 không có service: nếu validation không chặn, lỗi sẽ là Network.
@@ -1953,6 +2212,92 @@ mod tests {
         assert_eq!(until - since, 7 * 86_400);
         assert!(since <= Utc::now().timestamp());
         assert!((Utc::now().timestamp() - until).abs() <= 2);
+    }
+
+    #[tokio::test]
+    async fn report_range_command_request_shape() {
+        let server = MockServer::start().await;
+        let range = report_custom_range(
+            fixed_local_now(),
+            "custom",
+            Some("2026-10-01"),
+            Some("2026-10-20"),
+        )
+        .unwrap();
+        let since = range.since.to_string();
+        let until = range.until.to_string();
+
+        Mock::given(method("GET"))
+            .and(path("/123/posts"))
+            .and(header("Authorization", "Bearer test-token"))
+            .and(query_param_is_missing("access_token"))
+            .and(query_param_is_missing("after"))
+            .and(query_param("fields", REPORT_FIELDS))
+            .and(query_param("limit", "100"))
+            .and(query_param("since", since.as_str()))
+            .and(query_param("until", until.as_str()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [report_post("123_1", Some(4), Some(2), Some(1))],
+                "paging": { "cursors": { "after": "cursor-1" } }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/123/posts"))
+            .and(header("Authorization", "Bearer test-token"))
+            .and(query_param_is_missing("access_token"))
+            .and(query_param("after", "cursor-1"))
+            .and(query_param("since", since.as_str()))
+            .and(query_param("until", until.as_str()))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [report_post("123_2", Some(1), Some(1), None)]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let report = report_with_range(
+            server.uri().as_str(),
+            "test-token",
+            "123",
+            Some("Daily Motivation".to_string()),
+            range,
+            20,
+        )
+        .await
+        .unwrap();
+        assert_eq!(report.range_key, "custom");
+        assert_eq!(report.range_label, "Tùy chọn: 01/10/2026 – 20/10/2026");
+        assert_eq!(report.from_date.as_deref(), Some("2026-10-01"));
+        assert_eq!(report.to_date.as_deref(), Some("2026-10-20"));
+        assert_eq!(report.days, 20);
+        assert_eq!(report.post_count, 2);
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
+        for request in &requests {
+            assert!(!request.url.as_str().contains("access_token"));
+            let query: HashMap<String, String> = request
+                .url
+                .query_pairs()
+                .into_owned()
+                .collect();
+            assert_eq!(query.get("since").map(String::as_str), Some(since.as_str()));
+            assert_eq!(query.get("until").map(String::as_str), Some(until.as_str()));
+        }
+        let first: HashMap<String, String> = requests[0]
+            .url
+            .query_pairs()
+            .into_owned()
+            .collect();
+        assert!(!first.contains_key("after"));
+        let second: HashMap<String, String> = requests[1]
+            .url
+            .query_pairs()
+            .into_owned()
+            .collect();
+        assert_eq!(second.get("after").map(String::as_str), Some("cursor-1"));
     }
 
     #[tokio::test]

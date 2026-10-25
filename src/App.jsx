@@ -2021,12 +2021,57 @@ function truncateReportMessage(message) {
   return text.length > 160 ? `${text.slice(0, 157)}...` : text
 }
 
+// Date-range helpers for the report page. They only touch local Date math and
+// never call Graph. ISO strings compare correctly with plain string ordering.
+function localISODate(date) {
+  const pad = value => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+function todayLocalISO() {
+  return localISODate(new Date())
+}
+
+function monthStartLocalISO() {
+  const now = new Date()
+  return localISODate(new Date(now.getFullYear(), now.getMonth(), 1))
+}
+
+function isoDateParts(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || '').trim())
+  if (!match) return null
+  const parts = [Number(match[1]), Number(match[2]), Number(match[3])]
+  const probe = new Date(parts[0], parts[1] - 1, parts[2])
+  if (probe.getFullYear() !== parts[0] || probe.getMonth() !== parts[1] - 1 || probe.getDate() !== parts[2]) return null
+  return parts
+}
+
+function daysBetweenISO(from, to) {
+  const start = isoDateParts(from)
+  const end = isoDateParts(to)
+  if (!start || !end) return NaN
+  const startUtc = Date.UTC(start[0], start[1] - 1, start[2])
+  const endUtc = Date.UTC(end[0], end[1] - 1, end[2])
+  return Math.round((endUtc - startUtc) / 86_400_000) + 1
+}
+
+function customRangeError(from, to) {
+  if (!from || !to) return 'Vui lòng chọn Từ ngày và Đến ngày.'
+  if (from > to) return 'Từ ngày phải trước hoặc bằng Đến ngày.'
+  if (to > todayLocalISO()) return 'Không thể chọn ngày trong tương lai.'
+  if (daysBetweenISO(from, to) > 366) return 'Khoảng thời gian tối đa là 366 ngày.'
+  return ''
+}
+
 function ReportPage({ desktop }) {
   const [pages, setPages] = useState([])
   const [pagesLoaded, setPagesLoaded] = useState(false)
   const [pageId, setPageId] = useState('')
   const [configuredPageId, setConfiguredPageId] = useState('')
-  const [days, setDays] = useState(7)
+  const [rangeValue, setRangeValue] = useState('7')
+  const [fromDate, setFromDate] = useState(monthStartLocalISO())
+  const [toDate, setToDate] = useState(todayLocalISO())
+  const [loaded, setLoaded] = useState(null)
   const [report, setReport] = useState(null)
   const [updatedAt, setUpdatedAt] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -2064,8 +2109,15 @@ function ReportPage({ desktop }) {
     return configured && list.some(page => page.id === configured) ? configured : (list[0]?.id || '')
   }
 
+  const rangeErr = rangeValue === 'custom' ? customRangeError(fromDate, toDate) : ''
+
   const loadReport = async () => {
     if (!desktop || busyRef.current) return
+    if (rangeErr) {
+      setErr(rangeErr)
+      setMessage('')
+      return
+    }
     busyRef.current = true
     setLoading(true)
     setErr('')
@@ -2088,16 +2140,31 @@ function ReportPage({ desktop }) {
       const target = pickPage(available, pageId, configured)
       const targetPage = available.find(page => page.id === target)
       setPageId(target)
-      const data = await invokeDesktop('get_page_report', {
-        pageId: target,
-        pageName: targetPage?.name || null,
-        days,
-      })
+      const data = rangeValue === '7' || rangeValue === '30'
+        ? await invokeDesktop('get_page_report', {
+          pageId: target,
+          pageName: targetPage?.name || null,
+          days: Number(rangeValue),
+        })
+        : await invokeDesktop('get_page_report_range', {
+          pageId: target,
+          pageName: targetPage?.name || null,
+          rangeKey: rangeValue,
+          fromDate: rangeValue === 'custom' ? fromDate : null,
+          toDate: rangeValue === 'custom' ? toDate : null,
+        })
       setReport(data)
       setUpdatedAt(new Date())
+      setLoaded({
+        pageId: target,
+        rangeValue,
+        fromDate: rangeValue === 'custom' ? fromDate : '',
+        toDate: rangeValue === 'custom' ? toDate : '',
+      })
     } catch (reason) {
       setReport(null)
       setUpdatedAt(null)
+      setLoaded(null)
       setErr(String(reason?.message || reason))
     } finally {
       setLoading(false)
@@ -2119,6 +2186,7 @@ function ReportPage({ desktop }) {
       setPagesLoaded(true)
       setReport(null)
       setUpdatedAt(null)
+      setLoaded(null)
       setPageId(pickPage(available, '', configured))
     } catch (reason) {
       setErr(String(reason?.message || reason))
@@ -2128,8 +2196,12 @@ function ReportPage({ desktop }) {
     }
   }
 
-  const stale = Boolean(report) && (Number(report.days) !== Number(days) || report.pageId !== pageId)
-  const exportDisabled = !desktop || !report || stale || loading || listing
+  const stale = Boolean(report) && (!loaded
+    || loaded.pageId !== pageId
+    || loaded.rangeValue !== rangeValue
+    || (rangeValue === 'custom' && (loaded.fromDate !== fromDate || loaded.toDate !== toDate)))
+  const exportDisabled = !desktop || !report || stale || loading || listing || Boolean(rangeErr)
+  const loadDisabled = !desktop || loading || listing || Boolean(rangeErr)
 
   const exportCsv = async () => {
     if (exportDisabled) return
@@ -2167,12 +2239,22 @@ function ReportPage({ desktop }) {
         </select>
       </label>
       <label>Khoảng thời gian
-        <select aria-label="Khoảng thời gian" value={days} onChange={e => { setDays(Number(e.target.value)); setMessage('') }} disabled={!desktop || loading || listing}>
-          <option value={7}>7 ngày qua</option>
-          <option value={30}>30 ngày qua</option>
+        <select aria-label="Khoảng thời gian" value={rangeValue} onChange={e => { setRangeValue(e.target.value); setMessage('') }} disabled={!desktop || loading || listing}>
+          <option value="7">7 ngày qua</option>
+          <option value="30">30 ngày qua</option>
+          <option value="month">Tháng này</option>
+          <option value="custom">Tùy chọn</option>
         </select>
       </label>
-      <button className="primary" onClick={loadReport} disabled={!desktop || loading || listing}><RefreshCw size={15}/> {loading ? 'Đang tải...' : 'Tải báo cáo'}</button>
+      {rangeValue === 'custom' && <>
+        <label>Từ ngày
+          <input type="date" aria-label="Từ ngày" value={fromDate} max={todayLocalISO()} onChange={e => { setFromDate(e.target.value); setMessage('') }} disabled={!desktop || loading || listing}/>
+        </label>
+        <label>Đến ngày
+          <input type="date" aria-label="Đến ngày" value={toDate} max={todayLocalISO()} onChange={e => { setToDate(e.target.value); setMessage('') }} disabled={!desktop || loading || listing}/>
+        </label>
+      </>}
+      <button className="primary" onClick={loadReport} disabled={loadDisabled}><RefreshCw size={15}/> {loading ? 'Đang tải...' : 'Tải báo cáo'}</button>
       <button className="outline" onClick={reloadPages} disabled={!desktop || loading || listing}><RefreshCw size={15}/> {listing ? 'Đang tải...' : 'Tải lại danh sách Trang'}</button>
       <div className="export-actions">
         <button className="outline" onClick={exportCsv} disabled={exportDisabled}><Download size={15}/> Xuất CSV</button>
@@ -2182,17 +2264,18 @@ function ReportPage({ desktop }) {
     <p className="report-print-hint">Chọn &quot;Save as PDF&quot; trong hộp thoại in để lưu PDF.</p>
     {err && <div className="error-box">{err}</div>}
     {message && <div className="report-message">{message}</div>}
+    {rangeErr && <div className="report-warning">{rangeErr}</div>}
     {stale && <div className="report-warning">Bộ lọc đã thay đổi — bấm Tải báo cáo để cập nhật</div>}
 
     <div className="report-print">
       {report && <>
-        <div className="report-period">Trang: {report.pageName || report.pageId} • {report.days} ngày • {formatReportDate(report.since)} → {formatReportDate(report.until)} • Cập nhật lúc {formatReportTime(updatedAt || new Date())}</div>
+        <div className="report-period">Trang: {report.pageName || report.pageId} • {report.rangeLabel || `${report.days} ngày`} • {formatReportDate(report.since)} → {formatReportDate(report.until)} • Cập nhật lúc {formatReportTime(updatedAt || new Date())}</div>
         {report.truncated && <div className="report-warning">Đã đạt giới hạn 2.000 bài; số liệu chỉ tính trên các bài đã tải.</div>}
         {report.partial && <div className="report-warning">Một số bài thiếu summary cảm xúc/bình luận; tổng có thể thấp hơn thực tế.</div>}
       </>}
 
       <section className="stats-grid report-stats">
-        <StatCard icon={FileText} iconClass="purple" label="Tổng số bài" value={totalOf(report?.postCount)} delta="" sub={report ? `${report.days} ngày` : 'chưa tải báo cáo'}/>
+        <StatCard icon={FileText} iconClass="purple" label="Tổng số bài" value={totalOf(report?.postCount)} delta="" sub={report ? (report.rangeLabel || `${report.days} ngày`) : 'chưa tải báo cáo'}/>
         <StatCard icon={TrendingUp} iconClass="blue" label="Tổng tương tác" value={totalOf(report?.totalInteractions)} delta="" sub="cảm xúc + bình luận + chia sẻ"/>
         <StatCard icon={Heart} iconClass="orange" label="Cảm xúc" value={totalOf(report?.totalReactions)} delta="" sub="reactions trên bài đã tải"/>
         <StatCard icon={MessageCircle} iconClass="green" label="Bình luận / Chia sẻ" value={report ? `${report.totalComments} / ${report.totalShares}` : '—'} delta="" sub="comments / shares"/>

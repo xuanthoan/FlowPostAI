@@ -668,6 +668,7 @@ pub fn run() {
             facebook::list_page_posts,
             facebook::get_post_insights,
             facebook::get_page_report,
+            facebook::get_page_report_range,
             schedule::get_scheduler_config,
             schedule::set_scheduler_config,
             schedule::select_scheduler_page,
