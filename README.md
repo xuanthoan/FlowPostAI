@@ -61,6 +61,7 @@ FlowPost AI dùng token do bạn tự tạo và dán vào ứng dụng. Token c�
 
 - Dashboard không gọi Graph khi mở/đổi tab; mọi request báo cáo chỉ chạy khi bấm Tải báo cáo.
 - `Đăng bài` là trang riêng trong sidebar, tách khỏi dashboard `Tổng quan`: danh sách Trang chỉ được tải khi bấm `Tải danh sách Trang` (không gọi Graph khi mở trang hay chuyển tab), nội dung lấy từ `Kho nội dung` là dữ liệu cục bộ đã có trong ứng dụng, và mỗi bài đính kèm tối đa 10 ảnh. Nút trong `Cài đặt` → `Kết nối` đổi tên thành `Đăng ngay` và mở modal dùng chung form đăng bài.
+- Trang `Đăng bài` chia làm 2 cột: bên trái là khung soạn nội dung lớn, bên phải là khung media luôn hiển thị (tải `list_media` cục bộ khi mở trang, nút `Làm mới` để tải lại thư viện). Modal trong `Cài đặt` vẫn giữ bố cục 1 cột ~440px và chỉ tải media khi bấm `Chọn ảnh`.
 - Chi tiết: nút Tải báo cáo tải danh sách Trang + bài viết gần đây + insights; dữ liệu giữ trong bộ nhớ đến khi tải lại. Số liệu "Bài viết tháng này"/"Đã đăng thành công" vẫn lấy từ dữ liệu cục bộ, không gọi Graph.
 - Token trang được lưu lại chỉ khi giá trị thay đổi.
 - Mọi request Graph dùng Authorization: Bearer; token không còn nằm trong URL, form hoặc multipart.

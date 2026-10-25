@@ -1412,14 +1412,15 @@ function PublishPage({ desktop }) {
   return <section className="publish-page">
     <div className="page-heading"><div><p>ĐĂNG BÀI</p><h1>Đăng bài</h1><span>Đăng nội dung lên Trang Facebook đã kết nối, kèm tối đa 10 ảnh.</span></div></div>
     {!desktop && <div className="desktop-notice"><Send size={18}/><div><strong>Chỉ hỗ trợ bản Desktop</strong><span>Đăng bài cần Tauri Desktop và Facebook Token đã lưu trong Cài đặt.</span></div></div>}
-    <div className="panel publish-panel"><PublishForm /></div>
+    <div className="panel publish-panel"><PublishForm layout="page" /></div>
   </section>
 }
 
 const CONTENT_STATUS_LABELS = { draft: 'Nháp', approved: 'Đã duyệt', archived: 'Lưu trữ' }
 const contentStatusLabel = (s) => CONTENT_STATUS_LABELS[s] || s
 
-function PublishForm({ initialPages = [], onSuccess, onCancel }) {
+function PublishForm({ initialPages = [], onSuccess, onCancel, layout = 'modal' }) {
+  const isPage = layout === 'page'
   const desktop = isDesktop()
   const [pages, setPages] = useState(initialPages)
   const [pagesLoading, setPagesLoading] = useState(false)
@@ -1432,18 +1433,23 @@ function PublishForm({ initialPages = [], onSuccess, onCancel }) {
   const [msg, setMsg] = useState('')
   const [mediaItems, setMediaItems] = useState([])
   const [selectedMediaIds, setSelectedMediaIds] = useState([])
-  const [showPicker, setShowPicker] = useState(false)
+  const [showPicker, setShowPicker] = useState(isPage)
+  const mediaLoadedRef = useRef(false)
+  const [mediaLoading, setMediaLoading] = useState(false)
   const [contentItems, setContentItems] = useState([])
   const [showContent, setShowContent] = useState(false)
   const [contentLoaded, setContentLoaded] = useState(false)
 
-  const loadMedia = async () => {
+  const loadMedia = async (force = false) => {
     if (!desktop) return
+    if (mediaLoadedRef.current && !force) return
+    mediaLoadedRef.current = true
+    setMediaLoading(true)
     try {
       const list = await invokeDesktop('list_media')
       const withUrls = await Promise.all(list.map(async item => ({ ...item, url: await localAssetUrl(item.path) })))
       setMediaItems(withUrls)
-    } catch (e) { setErr(String(e)) }
+    } catch (e) { setErr(String(e)) } finally { setMediaLoading(false) }
   }
 
   // eslint-disable-next-line react-hooks/set-state-in-effect, react-hooks/exhaustive-deps
@@ -1491,51 +1497,71 @@ function PublishForm({ initialPages = [], onSuccess, onCancel }) {
 
   const selectedImages = selectedMediaIds.map(id => mediaItems.find(m => m.id === id)).filter(Boolean)
 
-  return (
-    <div className="publish-form">
-      <div>
-        <div className="publish-form-row">
-          <button className="outline" onClick={loadPages} aria-label="Tải danh sách Trang" disabled={!desktop || pagesLoading || busy} style={{height:32, fontSize:13}}><RefreshCw size={12}/> {pagesLoading ? 'Đang tải...' : 'Tải danh sách Trang'}</button>
-        </div>
-        {pages.length === 0 && !pagesLoaded && <p className="publish-hint">Bấm "Tải danh sách Trang" để tải danh sách Trang từ Facebook.</p>}
-        {pages.length === 0 && pagesLoaded && <p className="publish-hint">Chưa có Trang nào. Hãy vào Cài đặt → Kết nối → Tải Trang.</p>}
+  const composeNodes = <>
+    <div className="publish-content-source">
+      <button className="outline" onClick={toggleContentPicker} aria-label="Chọn từ Kho nội dung" disabled={!desktop || busy} style={{height:30, fontSize:13}}><FileText size={12}/> Chọn từ Kho nội dung</button>
+      {showContent && <div className="publish-picker">
+        {contentItems.length ? <div className="publish-content-list">
+          {contentItems.map(c => <button key={c.id} className="outline" onClick={()=>applyContent(c)} style={{height:'auto', padding:'8px 10px', justifyContent:'space-between', textAlign:'left'}}><span style={{fontSize:13, fontWeight:600}}>{c.title}</span><span style={{fontSize:11, color:'#8e8c96'}}>{contentStatusLabel(c.status)}</span></button>)}
+        </div> : <span style={{fontSize:13, color:'#777'}}>Kho nội dung trống</span>}
+      </div>}
+    </div>
+    <textarea className="publish-textarea" aria-label="Nội dung bài đăng" spellCheck={false} value={message} onChange={e=>setMessage(e.target.value)} placeholder="Nội dung bài đăng..." disabled={busy} />
+    <div className="publish-charcount">{charCount(message)} ký tự</div>
+  </>
+
+  const mediaBox = (
+    <div className="publish-media">
+      <div className="publish-media-head">
+        <label>Ảnh đính kèm (tùy chọn, tối đa 10 ảnh)</label>
+        {isPage
+          ? <button className="outline" onClick={() => loadMedia(true)} disabled={!desktop || busy || mediaLoading} aria-label="Làm mới thư viện media"><RefreshCw size={12}/> {mediaLoading ? 'Đang tải...' : 'Làm mới'}</button>
+          : <button className="outline" onClick={() => setShowPicker(v => !v)} disabled={!desktop || busy} style={{height:30, fontSize:13}}><Images size={12}/> {showPicker ? 'Ẩn' : 'Chọn ảnh'}</button>}
       </div>
-      <select aria-label="Chọn Trang" value={pageId} onChange={e=>setPageId(e.target.value)} disabled={busy || pagesLoading}>
-        <option value="">-- Chọn Trang --</option>
-        {pages.map(p => <option key={p.id} value={p.id}>{p.name} ({p.id})</option>)}
-      </select>
-      <div>
-        <button className="outline" onClick={toggleContentPicker} aria-label="Chọn từ Kho nội dung" disabled={!desktop || busy} style={{height:30, fontSize:13}}><FileText size={12}/> Chọn từ Kho nội dung</button>
-        {showContent && <div className="publish-picker">
-          {contentItems.length ? <div className="publish-content-list">
-            {contentItems.map(c => <button key={c.id} className="outline" onClick={()=>applyContent(c)} style={{height:'auto', padding:'8px 10px', justifyContent:'space-between', textAlign:'left'}}><span style={{fontSize:13, fontWeight:600}}>{c.title}</span><span style={{fontSize:11, color:'#8e8c96'}}>{contentStatusLabel(c.status)}</span></button>)}
-          </div> : <span style={{fontSize:13, color:'#777'}}>Kho nội dung trống</span>}
-        </div>}
-      </div>
-      <textarea aria-label="Nội dung bài đăng" spellCheck={false} value={message} onChange={e=>setMessage(e.target.value)} placeholder="Nội dung bài đăng..." disabled={busy} style={{width:'100%', minHeight:100, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:8, fontSize:14, resize:'vertical'}} />
-      <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{charCount(message)} ký tự</div>
-      <div>
-        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:4}}>
-          <label style={{fontSize:13, fontWeight:700}}>Ảnh đính kèm (tùy chọn, tối đa 10 ảnh)</label>
-          <button className="outline" onClick={()=>setShowPicker(v=>!v)} disabled={!desktop || busy} style={{height:30, fontSize:13}}><Images size={12}/> {showPicker ? 'Ẩn' : 'Chọn ảnh'}</button>
-        </div>
-        {!desktop && showPicker && <div style={{fontSize:12, color:'#777', marginTop:4}}>Chọn ảnh chỉ hoạt động trong bản Tauri Desktop</div>}
-        {showPicker && <div style={{marginTop:8, maxHeight:160, overflowY:'auto', border:'1px solid #eee', borderRadius:8, padding:8, background:'#fafafa'}}>
-          {mediaItems.length ? <div style={{display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:6}}>
+      {!desktop && (isPage || showPicker) && <div className="publish-media-note">Chọn ảnh chỉ hoạt động trong bản Tauri Desktop</div>}
+      {(isPage || showPicker) && <div className="publish-media-grid">
+        {mediaItems.length
+          ? <div className="publish-media-tiles">
             {mediaItems.map(m => <div key={m.id} onClick={()=>togglePublishMedia(m)} title={m.mediaType==='image' ? undefined : 'Chỉ hỗ trợ ảnh'} style={{border: selectedMediaIds.includes(m.id) ? '2px solid #6558d6' : '1px solid #e8e8ed', borderRadius:8, overflow:'hidden', cursor: m.mediaType==='image' ? 'pointer' : 'not-allowed', opacity: m.mediaType==='image' ? 1 : 0.55, background:'#fff'}}>
               <div style={{aspectRatio:1, overflow:'hidden', background:'#f5f5f5', display:'grid', placeItems:'center'}}>{m.mediaType==='image' ? <img src={m.url} alt={m.name} style={{width:'100%', height:'100%', objectFit:'cover'}}/> : <><video src={m.url} style={{width:'100%', height:'100%', objectFit:'cover'}}/><div style={{fontSize:11, color:'#777'}}><Film size={10}/> VIDEO</div></>}</div>
               <div style={{padding:4, fontSize:11, textAlign:'center', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', background: selectedMediaIds.includes(m.id) ? '#f0eefc' : '#fff', color: selectedMediaIds.includes(m.id) ? '#6558d6' : '#333'}}>{selectedMediaIds.includes(m.id) ? '✓ ' : ''}{m.name}</div>
             </div>)}
-          </div> : <span style={{fontSize:13, color:'#777'}}>Thư viện trống — hãy nhập media trước</span>}
-        </div>}
-        {selectedMediaIds.length > 0 && <div style={{fontSize:12, color:'#6558d6', marginTop:4, display:'flex', alignItems:'center', gap:6, flexWrap:'wrap'}}>
-          <span>Đã chọn {selectedMediaIds.length} ảnh để đăng kèm</span>
-          {selectedImages.slice(0,4).map(m => <img key={m.id} src={m.url} alt={m.name} style={{width:28, height:28, objectFit:'cover', borderRadius:4, border:'1px solid #e8e8ed'}}/>)}
-          {selectedImages.length > 4 && <span>+{selectedImages.length - 4}</span>}
-        </div>}
+          </div>
+          : <span className="publish-media-empty">Thư viện trống — hãy nhập media trước</span>}
+      </div>}
+      {selectedMediaIds.length > 0 && <div className="publish-media-selected">
+        <span>Đã chọn {selectedMediaIds.length} ảnh để đăng kèm</span>
+        {selectedImages.slice(0,4).map(m => <img key={m.id} src={m.url} alt={m.name} style={{width:28, height:28, objectFit:'cover', borderRadius:4, border:'1px solid #e8e8ed'}}/>)}
+        {selectedImages.length > 4 && <span>+{selectedImages.length - 4}</span>}
+      </div>}
+    </div>
+  )
+
+  return (
+    <div className={`publish-form publish-form--${layout}`}>
+      <div className="publish-toolbar">
+        <div className="publish-pages">
+          <div className="publish-form-row">
+            <button className="outline" onClick={loadPages} aria-label="Tải danh sách Trang" disabled={!desktop || pagesLoading || busy} style={{height:32, fontSize:13}}><RefreshCw size={12}/> {pagesLoading ? 'Đang tải...' : 'Tải danh sách Trang'}</button>
+          </div>
+          {pages.length === 0 && !pagesLoaded && <p className="publish-hint">Bấm "Tải danh sách Trang" để tải danh sách Trang từ Facebook.</p>}
+          {pages.length === 0 && pagesLoaded && <p className="publish-hint">Chưa có Trang nào. Hãy vào Cài đặt → Kết nối → Tải Trang.</p>}
+        </div>
+        <select className="publish-page-select" aria-label="Chọn Trang" value={pageId} onChange={e=>setPageId(e.target.value)} disabled={busy || pagesLoading}>
+          <option value="">-- Chọn Trang --</option>
+          {pages.map(p => <option key={p.id} value={p.id}>{p.name} ({p.id})</option>)}
+        </select>
       </div>
-      {err && <div className="error-box" style={{marginTop:8}}>{err}</div>}
-      {msg && <div className="desktop-notice" style={{background:'#eef7ee', borderColor:'#cde9cd', color:'#2e6b2e', marginTop:8, padding:8}}><CircleCheck size={14}/><span>{msg}</span></div>}
+
+      {isPage
+        ? <div className="publish-grid">
+            <div className="publish-compose">{composeNodes}</div>
+            {mediaBox}
+          </div>
+        : <>{composeNodes}{mediaBox}</>}
+
+      {err && <div className="error-box publish-alert">{err}</div>}
+      {msg && <div className="desktop-notice publish-alert" style={{background:'#eef7ee', borderColor:'#cde9cd', color:'#2e6b2e', marginTop:8, padding:8}}><CircleCheck size={14}/><span>{msg}</span></div>}
       <div className="publish-footer">
         {onCancel && <button className="outline" onClick={onCancel} disabled={busy} style={{height:36}}><X size={14}/> Đóng</button>}
         <button className="primary" onClick={handlePublish} disabled={busy || !pageId || !message.trim()} style={{height:36}}><Send size={14}/> Đăng ngay</button>

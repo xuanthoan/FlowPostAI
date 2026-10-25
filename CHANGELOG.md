@@ -2,6 +2,28 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-25 — Trang Đăng bài chia 2 cột
+
+### Added
+- `src/App.jsx` — `PublishForm` nhận prop `layout` (`page`/`modal`); trang `Đăng bài` dùng `layout="page"` để render `.publish-grid` 2 cột (`.publish-compose` bên trái, `.publish-media` bên phải). Trang tải `list_media` một lần khi mount qua `mediaLoadedRef`, có nút `Làm mới` (`RefreshCw`, `aria-label="Làm mới thư viện media"`) gọi lại `list_media`; modal giữ nguyên toggle `Chọn ảnh`/`Ẩn` và tải media theo yêu cầu.
+- `e2e/publish-page.spec.ts` — test mới `splits the page into compose and media columns without extra clicks`: kiểm tra 1 `.publish-grid`, 2 cột cùng hàng (`compose.x < media.x`, lệch `y` ≤ 4px), media hiển thị ngay khi mở trang, không có nút `Chọn ảnh`, textarea cao ≥ 320px, `list_media` gọi khi mount, `Làm mới` gọi lại `list_media`, không gọi `list_facebook_pages`.
+- `src/styles.css` — style `.publish-toolbar`/`.publish-grid`/`.publish-compose`/`.publish-textarea`/`.publish-media*`/`.publish-alert` và breakpoint 1250px; `.publish-panel` bỏ giới hạn `max-width:720px`.
+- `README.md` — bullet mô tả trang `Đăng bài` chia 2 cột, media luôn hiển thị kèm `Làm mới`, modal `Cài đặt` vẫn 1 cột.
+
+### Changed
+- `src/App.jsx` — textarea dùng class `.publish-textarea` (bỏ inline style), footer `.publish-footer` nằm ngoài grid và là con trực tiếp của `.publish-form`, nên luôn full width.
+- `e2e/publish-page.spec.ts` — test `caps the selection at 10 images` bỏ bước bấm `Chọn ảnh` (media đã hiển thị sẵn), thêm assert `i1.jpg` hiển thị trước vòng lặp; test modal thêm assert không có `.publish-grid`/`.publish-compose`.
+- Không đổi backend, IPC, payload `publish_content`, dependency hay cấu hình.
+
+### Verified
+- `npm run lint` — exit 0.
+- `npm run build` — success (Vite 8.2.2).
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/publish-page.spec.ts` — 9 passed / 0 failed.
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts` — 53 passed / 0 failed (44 test cũ + 8 test publish cũ + 1 test layout mới).
+
+### Unverified
+- Chưa kiểm tra thủ công trên ứng dụng Tauri Desktop với token Facebook thật (tải thư viện media cục bộ thật, đăng bài thật); E2E chỉ chạy ở chế độ mock.
+
 ## [Unreleased] - 2026-10-25 — Trang Đăng bài riêng
 
 ### Added

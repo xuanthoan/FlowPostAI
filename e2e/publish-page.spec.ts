@@ -182,13 +182,42 @@ test.describe('Publish page mock E2E', () => {
     await openPublishPage(page);
     const form = publishForm(page);
 
-    await form.getByRole('button', { name: 'Chọn ảnh', exact: true }).click();
+    await expect(form.getByText('i1.jpg', { exact: true })).toBeVisible();
     for (let i = 1; i <= 11; i += 1) {
       await form.getByText(`i${i}.jpg`, { exact: true }).click();
     }
 
     await expect(form.getByText('Chỉ chọn tối đa 10 ảnh mỗi bài')).toBeVisible();
     await expect(form.getByText('Đã chọn 10 ảnh')).toBeVisible();
+  });
+
+  test('splits the page into compose and media columns without extra clicks', async ({ page }) => {
+    await openPublishPage(page);
+    const form = publishForm(page);
+    const grid = form.locator('.publish-grid');
+    await expect(grid).toHaveCount(1);
+    const compose = form.locator('.publish-compose');
+    const media = form.locator('.publish-media');
+    await expect(compose).toBeVisible();
+    await expect(media).toBeVisible();
+    await expect(form.getByRole('button', { name: 'Chọn ảnh', exact: true })).toHaveCount(0);
+    await expect(form.locator('.publish-media-grid')).toBeVisible();
+    await expect(form.getByText('i1.jpg', { exact: true })).toBeVisible();
+    const composeBox = await compose.boundingBox();
+    const mediaBox = await media.boundingBox();
+    expect(composeBox!.x).toBeLessThan(mediaBox!.x);
+    expect(Math.abs(composeBox!.y - mediaBox!.y)).toBeLessThanOrEqual(4);
+    expect(composeBox!.x + composeBox!.width).toBeLessThanOrEqual(mediaBox!.x + 1);
+    const textareaBox = await form.getByLabel('Nội dung bài đăng').boundingBox();
+    expect(textareaBox!.height).toBeGreaterThanOrEqual(320);
+    const mediaCalls = async () => (await ipcCalls(page)).filter(c => c === 'list_media').length;
+    await expect.poll(mediaCalls).toBeGreaterThanOrEqual(1);
+    expect(await pageListCalls(page)).toHaveLength(0);
+    const before = await mediaCalls();
+    await form.getByRole('button', { name: 'Làm mới thư viện media' }).click();
+    await expect.poll(mediaCalls).toBe(before + 1);
+    await form.getByText('i2.jpg', { exact: true }).click();
+    await expect(form.getByText('Đã chọn 1 ảnh để đăng kèm')).toBeVisible();
   });
 
   test('Settings modal reuses the form without another page-list call', async ({ page }) => {
@@ -205,6 +234,8 @@ test.describe('Publish page mock E2E', () => {
     await page.getByRole('button', { name: 'Đăng ngay', exact: true }).click();
     const modal = page.locator('.publish-modal');
     await expect(modal).toBeVisible();
+    await expect(modal.locator('.publish-grid')).toHaveCount(0);
+    await expect(modal.locator('.publish-compose')).toHaveCount(0);
     await expect(modal.getByRole('heading', { name: 'Đăng bài ngay' })).toBeVisible();
     expect((await pageListCalls(page)).length).toBe(afterList);
 
