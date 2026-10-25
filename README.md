@@ -38,6 +38,10 @@ npm run tauri:build
 
 Bộ cài được tạo trong `src-tauri/target/release/bundle/`. Định dạng phụ thuộc hệ điều hành build: MSI/NSIS trên Windows, DMG trên macOS và AppImage/deb/rpm trên Linux.
 
+- `bundle.icon` trong `src-tauri/tauri.conf.json` khai báo bộ icon dùng khi đóng gói; trên Windows, `icons/icon.ico` là file được WiX/NSIS dùng để gắn icon cho bộ cài và ứng dụng.
+- Các file icon trong `src-tauri/icons/` được lưu trong git, nên bản clone mới vẫn build được mà không cần tạo lại icon.
+- Trên Windows, MSI nằm trong `src-tauri/target/release/bundle/msi/`, còn NSIS `*-setup.exe` nằm trong `src-tauri/target/release/bundle/nsis/`. Nếu xóa `bundle.icon`, bước đóng gói MSI sẽ lỗi `Couldn't find a .ico icon`.
+
 > Tauri không cross-compile bộ cài desktop theo cách thông thường. Hãy build bản Windows trên Windows, bản macOS trên macOS và bản Linux trên Linux.
 
 ## Lấy Facebook Token (5 quyền bắt buộc)

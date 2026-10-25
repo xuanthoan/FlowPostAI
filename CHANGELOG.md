@@ -2,6 +2,17 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-25 — Sửa lỗi đóng gói MSI thiếu icon
+
+### Fixed
+- `src-tauri/tauri.conf.json` — thêm `bundle.icon` với bộ icon sẵn có (`icons/32x32.png`, `icons/128x128.png`, `icons/128x128@2x.png`, `icons/icon.icns`, `icons/icon.ico`); trước đó `bundle.icon` rỗng nên WiX không có ứng viên `.ico` và `npm run tauri:build` dừng với `Couldn't find a .ico icon`.
+- `README.md` — ghi chú `bundle.icon`, vị trí MSI/NSIS và lỗi MSI khi thiếu khai báo icon.
+
+### Verified
+- `npm run tauri:build` — exit 0; tạo 2 bundle: `FlowPost AI_0.3.0_x64_en-US.msi` (MSI) và `FlowPost AI_0.3.0_x64-setup.exe` (NSIS).
+- `npm run lint` — exit 0.
+- `npm run build` — success (Vite 8.2.2).
+
 ## [Unreleased] - 2026-10-25 — Trang Đăng bài chia 2 cột
 
 ### Added
