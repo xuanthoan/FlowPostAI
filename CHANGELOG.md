@@ -7,6 +7,7 @@ Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở �
 ### Added
 - `e2e/ai.spec.ts` — test mới `splits AI Content into compose and image columns and merges the buttons`: kiểm tra 1 `.ai-grid` gồm 1 `.ai-compose` + 1 `.ai-image-col` cùng hàng (`compose.x < imageCol.x`, lệch `y` ≤ 4px), checkbox `Tạo ảnh minh hoạ bằng AI` hiển thị và bật được trước khi tạo, nhãn nút đổi `Tạo nội dung` → `Tạo nội dung + Ảnh AI` khi tick và trả lại khi bỏ tick, một lần bấm gọi `generate_content` 1 lần rồi `generate_image` 1 lần, có `Đã tạo ảnh minh hoạ`/`Đã gắn vào bài viết`/`Gắn media (1)`, nút `Tạo ảnh` thủ công vẫn còn và không được bấm. Mock trong test thêm bộ đếm `window.__GEN_CALLS__`/`window.__IMG_CALLS__`.
 - `src/styles.css` — style `.ai-grid` (2 cột, breakpoint 1250px/980px), `.ai-compose`, `.ai-image-col`; không dùng `position:sticky`.
+- `e2e/library-image.spec.ts` — 5 test mock cho `Kho nội dung`: dòng chưa có ảnh hiện `Tạo ảnh AI` → gọi `generate_image` với `title`/`body` của bài rồi `update_content` với `mediaIds: ['img-1']`; dòng đã có ảnh hiện `Đổi ảnh AI` và modal `Đổi ảnh AI` xuất hiện **trước** khi gọi AI, đóng bằng `Hủy`/`Esc`/overlay mà không tạo ảnh; `Thêm ảnh` giữ thứ tự `['old-1','img-1']`; `Thay ảnh` còn `['img-1']`; lỗi `generate_image` không gọi `update_content` và nút bật lại. Mock ghi `window.__CALLS__`/`window.__GRAPH_CALLS__`; mỗi test assert Graph = 0.
 
 ### Changed
 - `src/App.jsx` — `generate()` giữ `busy` suốt cả chuỗi nội dung → ảnh (bỏ `setBusy(false)` sớm, chỉ còn `finally`), reset thêm `setImageErr('')` mỗi lần tạo; nút tạo đổi nhãn động theo `autoImage` (`Tạo nội dung`/`Tạo nội dung + Ảnh AI`, khi chạy hiện `Đang tạo...`/`Đang tạo nội dung + ảnh...`); checkbox `Tạo ảnh minh hoạ bằng AI` chuyển lên ngay dưới prompt kèm hint mới; trang `AI Content` chia 2 cột (`.ai-compose` bên trái, `.ai-image-col` bên phải), textarea nội dung cao tối thiểu 300px, footer vẫn ngoài grid và full width.
@@ -17,12 +18,16 @@ Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở �
 - `e2e/ai.spec.ts` — thêm test `AI Content explains image generation to a first-time user`: kiểm tra nội dung hộp `.ai-guide` (nguồn ảnh, không cần prompt, `Cách 1`/`Cách 2`, `Thư viện media`), label `Phong cách ảnh` + hint màu sắc/ánh sáng, hint `Chọn media`/`ảnh/video có sẵn`, pill `Tuỳ chọn` không phải button, nút `Tạo ảnh` disabled khi chưa có bài + hint tương ứng, hộp cao ≤ 210px, và sau khi tạo nội dung thì hint đổi và nút bật lại.
 - `README.md` — mục `Tạo ảnh minh hoạ bằng AI` cập nhật theo copy mới: cột `Ảnh minh hoạ AI`, hộp hướng dẫn trong app (`Cách 1 — Tự động`/`Cách 2 — Thủ công`), `Phong cách ảnh` (màu sắc/ánh sáng, không phải nội dung), “không cần prompt ảnh riêng”, ảnh tự lưu Thư viện media + tự gắn, nút `Tạo ảnh` để tạo lại/retry.
 - Không đổi backend, IPC, payload `generate_content`/`generate_image`, dependency hay cấu hình.
+- `src/App.jsx` — `ContentWarehousePage` thêm nút theo dòng `Tạo ảnh AI`/`Đổi ảnh AI` và modal xác nhận `Đổi ảnh AI` (`Hủy`/`Thêm ảnh`/`Thay ảnh`): tạo ảnh từ tiêu đề + nội dung với style/provider/model/size/saveDir lấy từ `list_image_styles`/`get_image_config`/`list_providers`, rồi `update_content` với `style: it.style` verbatim (không qua `resolveStyleName`), `customStyle`/`topic`/`prompt` giữ nguyên, `mediaIds` = `[mediaId]` khi thay hoặc nối thêm (tối đa 10) khi thêm. Nhãn `Đang tạo ảnh...` chỉ ở dòng đang chạy, mọi nút ảnh bị tắt; thông báo thành công dùng `.desktop-notice`, lỗi dùng `.error-box` sẵn có. Không gọi Graph, không gọi `save_content`.
+- `README.md` — thêm mục `Kho nội dung` trong `Tạo ảnh minh hoạ bằng AI`: nút theo dòng, thêm vs thay, style/provider từ `Cài đặt` → `Model AI`, giới hạn 10 ảnh, ảnh lưu vào `Thư viện media`, và hành vi khi lỗi.
+- Không đổi `src/styles.css`, `src-tauri/**`, dependency hay cấu hình.
 
 ### Verified
-- `npm run lint` — exit 0.
+- `npm run lint` — exit 0 (0 error, 0 warning).
 - `npm run build` — success (Vite 8.2.2).
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/library-image.spec.ts` — 5 passed / 0 failed.
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts` — 60 passed / 0 failed (55 test cũ + 5 test mới).
 - `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/ai.spec.ts` — 9 passed / 0 failed.
-- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts` — 55 passed / 0 failed (53 test cũ + test layout + test hướng dẫn ảnh mới).
 
 ### Unverified
 - Chưa kiểm tra thủ công trên ứng dụng Tauri Desktop với provider ảnh thật; E2E chỉ chạy ở chế độ mock.

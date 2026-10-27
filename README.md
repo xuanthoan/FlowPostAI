@@ -103,6 +103,15 @@ FlowPost AI dùng token do bạn tự tạo và dán vào ứng dụng. Token c�
 - Nếu tạo ảnh lỗi, bài viết đã tạo vẫn giữ nguyên; bấm `Thử tạo lại ảnh`. Ảnh không được tạo tự động khi bạn chỉ lưu bài viết.
 - Cấu hình ảnh được lưu trong `image-config.json` (provider/model/style/thư mục/kích thước).
 
+### Kho nội dung
+
+- Mỗi dòng trong `Kho nội dung` có nút `Tạo ảnh AI` (bài chưa có ảnh) hoặc `Đổi ảnh AI` (bài đã có ảnh). Ảnh được tạo từ **Tiêu đề + Nội dung** của bài bằng `generate_image`, dùng style/provider/model/kích thước/thư mục lưu trong `Cài đặt` → `Model AI` (mục `Model tạo ảnh`). Không cần prompt ảnh riêng, nhưng bài phải có prompt nội dung vì `update_content` yêu cầu.
+- Bài chưa có ảnh: bấm `Tạo ảnh AI` là tạo ngay và gắn đúng 1 ảnh mới (`mediaIds` = `[ảnh mới]`).
+- Bài đã có ảnh: bấm `Đổi ảnh AI` mở hộp xác nhận **trước khi** gọi AI — `Thêm ảnh` nối ảnh mới vào sau các ảnh cũ (giữ thứ tự), `Thay ảnh` thay toàn bộ bằng ảnh mới; `Hủy`, phím `Esc` hoặc bấm nền tối đều đóng mà không tạo ảnh. Mỗi bài tối đa 10 ảnh; khi đã đủ 10, `Thêm ảnh` báo lỗi và bạn phải chọn `Thay ảnh`.
+- Ảnh luôn được lưu vào `Thư viện media` và gắn vào bài; số `media` trên dòng cập nhật ngay sau khi xong (không cần tải lại trang). Trong lúc tạo, chỉ dòng đang chạy hiện `Đang tạo ảnh...` và mọi nút ảnh bị tắt.
+- Nếu `generate_image` lỗi, bài viết giữ nguyên (không gọi `update_content`) và nút bật lại để thử tiếp. Nếu ảnh tạo xong nhưng `update_content` lỗi, bài viết vẫn giữ nguyên còn tệp ảnh đã tạo có thể còn trong `Thư viện media` (ứng dụng không tự xóa).
+- Các thao tác này chỉ gọi IPC cục bộ: không gọi Graph/Facebook và không dùng `save_content`.
+
 ## Khi gặp lỗi token hoặc app bị hạn chế
 
 - Mã 190 nghĩa là access token không hợp lệ, đã hết hạn hoặc đã bị thu hồi. Không tạo app Meta mới để khắc phục.

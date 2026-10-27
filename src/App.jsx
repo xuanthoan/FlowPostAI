@@ -1781,6 +1781,13 @@ function ContentWarehousePage({ resolveStyleName }) {
   const [topicQuery, setTopicQuery] = useState('')
   const [styleQuery, setStyleQuery] = useState('')
   const [mediaById, setMediaById] = useState({})
+  const [msg, setMsg] = useState('')
+  const [imageStyles, setImageStyles] = useState([])
+  const [imageProviders, setImageProviders] = useState([])
+  const [imageConfig, setImageConfig] = useState({ providerId: '', model: '', saveDir: '', styleId: '', size: '1024x1024' })
+  const [imageStyleId, setImageStyleId] = useState('')
+  const [imageBusyId, setImageBusyId] = useState(null)
+  const [imageConfirm, setImageConfirm] = useState(null)
 
   const refresh = async () => {
     if (!desktop) return
@@ -1807,12 +1814,101 @@ function ContentWarehousePage({ resolveStyleName }) {
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { refresh() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const loadImageSetup = async () => {
+    if (!desktop) return
+    try {
+      const [list, cfg, provs] = await Promise.all([
+        invokeDesktop('list_image_styles'),
+        invokeDesktop('get_image_config').catch(() => null),
+        invokeDesktop('list_providers').catch(() => []),
+      ])
+      const styles = Array.isArray(list) ? list : []
+      const config = cfg || {}
+      setImageStyles(styles)
+      setImageProviders(Array.isArray(provs) ? provs : [])
+      setImageConfig({
+        providerId: config.providerId || '',
+        model: config.model || '',
+        saveDir: config.saveDir || '',
+        styleId: config.styleId || '',
+        size: config.size || '1024x1024',
+      })
+      setImageStyleId((config.styleId && styles.some(s => s.id === config.styleId))
+        ? config.styleId
+        : (styles.find(s => s.id === DEFAULT_IMAGE_STYLE_ID)?.id || styles[0]?.id || ''))
+    } catch (e) { setErr(String(e)) }
+  }
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { loadImageSetup() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!imageConfirm) return undefined
+    const onKey = (e) => { if (e.key === 'Escape' && !imageBusyId) setImageConfirm(null) }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [imageConfirm, imageBusyId])
+
   const remove = async (id) => {
     if (!window.confirm('Xóa nội dung này?')) return
     try { await invokeDesktop('delete_content', { id }); await refresh() } catch (e) { setErr(String(e)) }
   }
   const approve = async (id) => {
     try { await invokeDesktop('update_content_status', { id, status: 'approved' }); await refresh() } catch (e) { setErr(String(e)) }
+  }
+
+  const startImage = (it) => {
+    if (!desktop || imageBusy) return
+    setErr(''); setMsg('')
+    if (!String(it.prompt || '').trim()) {
+      setErr('Bài viết chưa có prompt. Bấm Sửa để thêm prompt rồi tạo ảnh AI.')
+      return
+    }
+    if (!String(it.title || '').trim() && !String(it.body || '').trim()) {
+      setErr('Bài viết chưa có tiêu đề hoặc nội dung để tạo ảnh.')
+      return
+    }
+    if ((it.mediaIds || []).length === 0) { runImageFor(it, 'replace'); return }
+    setImageConfirm({ ...it })
+  }
+
+  const runImageFor = async (it, mode) => {
+    if (!desktop || imageBusy) return
+    const existing = Array.isArray(it.mediaIds) ? it.mediaIds.filter(Boolean) : []
+    if (mode === 'append' && existing.length >= MAX_PUBLISH_IMAGES) {
+      setImageConfirm(null)
+      setErr(`Bài viết đã có tối đa ${MAX_PUBLISH_IMAGES} ảnh. Hãy chọn "Thay ảnh".`)
+      return
+    }
+    setImageConfirm(null)
+    setImageBusyId(it.id); setErr(''); setMsg('')
+    try {
+      const payload = { title: it.title || '', body: it.body || '' }
+      if (imageStyleId) payload.styleId = imageStyleId
+      if (imageConfig.providerId) payload.providerId = imageConfig.providerId
+      if (imageConfig.model) payload.model = imageConfig.model
+      if (imageConfig.size) payload.size = imageConfig.size
+      if (imageConfig.saveDir) payload.saveDir = imageConfig.saveDir
+      const res = await invokeDesktop('generate_image', { payload })
+      const newId = res && res.mediaId
+      if (!newId) throw new Error('Không nhận được mediaId từ generate_image')
+      const mediaIds = mode === 'append'
+        ? [...existing.filter(id => id !== newId), newId].slice(0, MAX_PUBLISH_IMAGES)
+        : [newId]
+      await invokeDesktop('update_content', {
+        payload: {
+          contentId: it.id,
+          title: it.title || '',
+          body: it.body || '',
+          prompt: it.prompt || '',
+          style: it.style,
+          customStyle: it.customStyle ?? null,
+          topic: it.topic ?? null,
+          mediaIds,
+        },
+      })
+      await refresh()
+      setMsg(mode === 'append' ? 'Đã thêm ảnh AI vào bài viết' : 'Đã tạo ảnh AI và cập nhật bài viết')
+    } catch (e) { setErr(String(e)) } finally { setImageBusyId(null) }
   }
 
   const topicOptions = distinctSortedLabels(items.map(it => it.topic))
@@ -1834,6 +1930,11 @@ function ContentWarehousePage({ resolveStyleName }) {
     .map(id => mediaById[id])
     .filter(Boolean)
 
+  const imageBusy = !!imageBusyId
+  const imageProvider = imageProviders.find(p => p.id === imageConfig.providerId) || null
+  const imageStyleLabel = (imageStyles.find(s => s.id === imageStyleId) || {}).name || imageStyleId || 'Mặc định'
+  const imageProviderLabel = imageConfig.providerId ? (imageProvider ? (imageProvider.displayName || imageProvider.id) : imageConfig.providerId) : 'Mặc định'
+
   const formatDate = (iso) => {
     try { return new Intl.DateTimeFormat('vi-VN', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}).format(new Date(iso)) } catch { return iso }
   }
@@ -1842,6 +1943,7 @@ function ContentWarehousePage({ resolveStyleName }) {
     <div className="page-heading"><div><p>KHO NỘI DUNG</p><h1>Kho nội dung</h1><span>Lưu trữ nội dung đã tạo, gắn media, duyệt và chuẩn bị lịch đăng.</span></div><div className="media-actions"><button className="outline" onClick={refresh} disabled={!desktop || busy}><RefreshCw size={16}/> Làm mới</button></div></div>
     {!desktop && <div className="desktop-notice"><HardDrive size={23}/><div><strong>Hãy mở bằng ứng dụng FlowPost AI Desktop</strong><span>Chỉ bản Tauri mới đọc được kho cục bộ.</span></div></div>}
     {err && <div className="error-box">{err}</div>}
+    {msg && <div className="desktop-notice" style={{background:'#eef7ee', borderColor:'#cde9cd', color:'#2e6b2e'}}><CircleCheck size={18}/><span>{msg}</span></div>}
     <div className="media-summary" style={{flexWrap:'wrap'}}>
       <div><FileText size={18}/><span><b>{items.length}</b> tổng</span></div>
       <div><CircleCheck size={18}/><span><b>{items.filter(i=>i.status==='draft').length}</b> nháp</span></div>
@@ -1890,11 +1992,28 @@ function ContentWarehousePage({ resolveStyleName }) {
       <div style={{display:'flex', gap:8, flexWrap:'wrap', flexShrink:0}}>
         <button className="outline" onClick={()=>approve(it.id)} disabled={it.status==='approved' || busy} style={{height:30, fontSize:13}}><CircleCheck size={12}/> Duyệt</button>
         <button className="primary" onClick={()=>setScheduleFor(it.id)} disabled={it.status!=='approved' || busy} title={it.status!=='approved' ? 'Hãy duyệt trước' : ''} style={{height:30, fontSize:13}}><CalendarDays size={12}/> Lên lịch</button>
+        <button className="outline" onClick={()=>startImage(it)} disabled={!desktop || busy || imageBusy} title={attachedMedia(it).length ? 'Tạo ảnh AI mới để thay hoặc thêm vào bài' : 'Tạo ảnh AI từ tiêu đề và nội dung bài'} style={{height:30, fontSize:13}}><Sparkles size={12}/> {imageBusyId === it.id ? 'Đang tạo ảnh...' : (attachedMedia(it).length ? 'Đổi ảnh AI' : 'Tạo ảnh AI')}</button>
         <button className="outline" onClick={()=>remove(it.id)} disabled={busy} style={{height:30, fontSize:13}}><Trash2 size={12}/> Xóa</button>
         <button className="outline" onClick={()=>setEditing({...it})} disabled={busy} style={{height:30, fontSize:13}}><Pencil size={12}/> Sửa</button>
       </div>
     </article>)}</div> : <div className="media-empty"><div><FileText size={34}/></div><h2>{items.length===0 ? 'Kho nội dung đang trống' : 'Không có kết quả'}</h2><p>{items.length===0 ? 'Hãy tạo nội dung ở AI Content và Lưu vào kho.' : 'Thử đổi bộ lọc hoặc từ khóa.'}</p></div>}
     {scheduleFor && <ScheduleModal contentId={scheduleFor} onClose={()=>setScheduleFor(null)} onCreated={refresh} />}
+    {imageConfirm && <div className="modal-overlay" onMouseDown={e=>{ if (e.target === e.currentTarget && !imageBusy) setImageConfirm(null) }} style={{position:'fixed', inset:0, background:'#0008', display:'grid', placeItems:'center', zIndex:50}}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label="Đổi ảnh AI" onClick={e=>e.stopPropagation()} style={{maxWidth:460, width:'90%', background:'#fff', borderRadius:12, padding:20, boxShadow:'0 8px 30px rgba(0,0,0,.2)'}}>
+        <h2 style={{margin:0, fontSize:17}}>Đổi ảnh AI</h2>
+        <p style={{margin:'10px 0 0', fontSize:13, color:'#555', lineHeight:1.5}}>Nội dung đã có {(imageConfirm.mediaIds || []).length} ảnh. Bạn muốn thay toàn bộ bằng ảnh AI mới hay thêm ảnh mới?</p>
+        <div style={{marginTop:12, fontSize:12, color:'#888', lineHeight:1.6}}>
+          <div>Style: <b style={{color:'#555'}}>{imageStyleLabel}</b></div>
+          <div>Provider: <b style={{color:'#555'}}>{imageProviderLabel}</b></div>
+          <div style={{marginTop:4}}>Đổi trong Cài đặt → Model AI.</div>
+        </div>
+        <div style={{display:'flex', gap:8, justifyContent:'flex-end', marginTop:16, flexWrap:'wrap'}}>
+          <button className="outline" onClick={()=>setImageConfirm(null)} disabled={imageBusy} style={{height:34}}>Hủy</button>
+          <button className="outline" onClick={()=>runImageFor(imageConfirm, 'append')} disabled={imageBusy} style={{height:34}}>Thêm ảnh</button>
+          <button className="primary" onClick={()=>runImageFor(imageConfirm, 'replace')} disabled={imageBusy} style={{height:34}}>Thay ảnh</button>
+        </div>
+      </div>
+    </div>}
     {editing && <div className="modal-overlay" onMouseDown={e=>{ if (e.target === e.currentTarget) setEditing(null) }} style={{position:'fixed', inset:0, background:'#0008', display:'grid', placeItems:'center', zIndex:50}}>
       <div className="modal" onClick={e=>e.stopPropagation()} style={{maxWidth:600, width:'90%', background:'#fff', borderRadius:12, padding:20, boxShadow:'0 8px 30px rgba(0,0,0,.2)'}}>
         <h2 style={{margin:0, fontSize:17}}>Sửa nội dung</h2>
