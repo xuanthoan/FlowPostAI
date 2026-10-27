@@ -129,6 +129,7 @@ Thêm vào đó:
 ### Chuẩn bị cho production
 
 `pages_manage_posts` cần App Review (Advanced Access) và, trong một số trường hợp, cần Business Verification. App để ở Development mode chỉ hoạt động với admin/tester của chính app, còn token dán tay từ Graph Explorer là công cụ debug chứ không phải mô hình xác thực cho production. Khuyến nghị: dùng **một** app production với quy trình App Review đầy đủ, thay vì tạo nhiều app dùng một lần rồi bỏ.
+- Tài liệu phát hành: [Release notes 0.4.0](docs/RELEASE_NOTES_0.4.0.md) và [bàn giao dự án](docs/HANDOVER.md).
 
 ## Lưu trữ cục bộ
 

@@ -2,7 +2,9 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
-## [Unreleased] - 2026-10-27 — Tạo nội dung + Ảnh AI trong một lần bấm
+## [Unreleased]
+
+## [0.4.0] - 2026-10-27 — Tạo nội dung + Ảnh AI trong một lần bấm
 
 ### Added
 - `e2e/ai.spec.ts` — test mới `splits AI Content into compose and image columns and merges the buttons`: kiểm tra 1 `.ai-grid` gồm 1 `.ai-compose` + 1 `.ai-image-col` cùng hàng (`compose.x < imageCol.x`, lệch `y` ≤ 4px), checkbox `Tạo ảnh minh hoạ bằng AI` hiển thị và bật được trước khi tạo, nhãn nút đổi `Tạo nội dung` → `Tạo nội dung + Ảnh AI` khi tick và trả lại khi bỏ tick, một lần bấm gọi `generate_content` 1 lần rồi `generate_image` 1 lần, có `Đã tạo ảnh minh hoạ`/`Đã gắn vào bài viết`/`Gắn media (1)`, nút `Tạo ảnh` thủ công vẫn còn và không được bấm. Mock trong test thêm bộ đếm `window.__GEN_CALLS__`/`window.__IMG_CALLS__`.
