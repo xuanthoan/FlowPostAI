@@ -91,10 +91,11 @@ FlowPost AI dùng token do bạn tự tạo và dán vào ứng dụng. Token c�
 
 ## Tạo ảnh minh hoạ bằng AI
 
-- Trang `AI Content` chia 2 cột: cột trái để tạo nội dung (chủ đề, prompt, style/model, tiêu đề, nội dung) và cột phải để tạo ảnh AI (style ảnh, provider/model, nút `Tạo ảnh`, ảnh xem trước và media). Footer `Xóa form`/`Lưu vào kho` nằm dưới cả 2 cột.
-- Tick `Tạo ảnh minh hoạ bằng AI` (mặc định tắt) **trước khi** tạo nội dung: nút `Tạo nội dung` đổi thành `Tạo nội dung + Ảnh AI`. Một lần bấm sẽ tạo nội dung rồi tự tạo **1 ảnh** ngay sau đó, dựa trên tiêu đề + nội dung bài viết và `Style ảnh` đang chọn — không cần bấm `Tạo ảnh`. Không tick thì chỉ tạo nội dung.
-- Nút `Tạo ảnh` ở cột phải vẫn còn để tạo lại ảnh cho bài đang mở (ví dụ sau khi sửa nội dung) hoặc thử lại khi lần tạo ảnh trước bị lỗi.
-- `Style ảnh` là danh sách riêng (`image_styles.json`), có 3 style mặc định (`Điện ảnh`, `Tối giản`, `Minh hoạ phẳng`) và cho phép thêm/sửa/nhân bản/xóa/khôi phục mặc định. Style ảnh chỉ chứa mô tả phong cách, không phải nội dung bài viết.
+- Trang `AI Content` chia 2 cột: cột trái để tạo nội dung (chủ đề, prompt, style/model, tiêu đề, nội dung) và cột phải `Ảnh minh hoạ AI` (hộp hướng dẫn, phong cách ảnh, provider/model, nút `Tạo ảnh`, ảnh xem trước và media). Ảnh là tuỳ chọn: không bật gì thì trang chỉ tạo bài viết. Footer `Xóa form`/`Lưu vào kho` nằm dưới cả 2 cột.
+- Nguồn tạo ảnh là **Tiêu đề + Nội dung** bài viết và `Phong cách ảnh` đang chọn; **bạn không cần viết prompt ảnh riêng**. Hộp hướng dẫn trong cột phải tóm tắt 2 cách dùng:
+  - `Cách 1 — Tự động`: tick `Tạo ảnh minh hoạ bằng AI` (mặc định tắt) ở cột trái **trước khi** tạo nội dung; nút `Tạo nội dung` đổi thành `Tạo nội dung + Ảnh AI`, và một lần bấm tạo nội dung rồi tự tạo **1 ảnh** ngay sau đó.
+  - `Cách 2 — Thủ công`: khi đã có Tiêu đề/Nội dung, bấm `Tạo ảnh` ở cột phải — dùng để tạo lại ảnh sau khi sửa bài, hoặc bấm `Thử tạo lại ảnh` khi lần trước bị lỗi. Nút `Tạo ảnh` chỉ bật khi có Tiêu đề hoặc Nội dung.
+- `Phong cách ảnh` quyết định màu sắc, ánh sáng, không khí của ảnh — không phải nội dung bài viết. Đây là danh sách riêng (`image_styles.json`), có 3 style mặc định (`Điện ảnh`, `Tối giản`, `Minh hoạ phẳng`) và cho phép thêm/sửa/nhân bản/xóa/khôi phục mặc định.
 - Chọn provider/model tạo ảnh: `Cài đặt` → tab `Model AI` → mục `Model tạo ảnh` (provider, model, kích thước, thư mục lưu). Chọn provider/model viết content ở cùng tab, mục `Model viết content`; AI Content vẫn có thể đổi model cho từng bài.
 - Ứng dụng gọi `POST {base}/images/generations` theo chuẩn OpenAI-compatible với `n=1`, `response_format=b64_json`; nếu provider trả `url`, backend tự tải ảnh về (không gửi API key tới host tải ảnh).
 - Ảnh luôn được lưu vào thư viện media của ứng dụng (`media/`) và được gắn vào bài viết để xem trước/đăng kèm. Nếu bạn chọn `Thư mục lưu ảnh`, ứng dụng ghi thêm một bản sao vào thư mục đó; lỗi ghi bản sao chỉ là cảnh báo, ảnh trong thư viện vẫn dùng được.

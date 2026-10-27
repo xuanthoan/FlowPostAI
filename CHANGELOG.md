@@ -11,13 +11,18 @@ Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở �
 ### Changed
 - `src/App.jsx` — `generate()` giữ `busy` suốt cả chuỗi nội dung → ảnh (bỏ `setBusy(false)` sớm, chỉ còn `finally`), reset thêm `setImageErr('')` mỗi lần tạo; nút tạo đổi nhãn động theo `autoImage` (`Tạo nội dung`/`Tạo nội dung + Ảnh AI`, khi chạy hiện `Đang tạo...`/`Đang tạo nội dung + ảnh...`); checkbox `Tạo ảnh minh hoạ bằng AI` chuyển lên ngay dưới prompt kèm hint mới; trang `AI Content` chia 2 cột (`.ai-compose` bên trái, `.ai-image-col` bên phải), textarea nội dung cao tối thiểu 300px, footer vẫn ngoài grid và full width.
 - `README.md` — mục `Tạo ảnh minh hoạ bằng AI` mô tả tick checkbox trước khi tạo, nhãn nút mới, 1 click tạo nội dung + 1 ảnh, nút `Tạo ảnh` giữ lại để tạo lại/thử lại, và layout 2 cột.
+- `src/App.jsx` — cột phải đổi tên `Ảnh minh hoạ AI` (pill `Tuỳ chọn` là `<span>`, không phải button) và thêm hộp `.ai-guide` trả lời 6 câu hỏi của người mới: nguồn ảnh = **Tiêu đề + Nội dung** + phong cách ảnh, không cần viết prompt ảnh riêng, `Cách 1 — Tự động` (checkbox + nút gộp) và `Cách 2 — Thủ công` (nút `Tạo ảnh`), ảnh tự lưu **Thư viện media** và tự gắn vào bài.
+- `src/App.jsx` — nhãn chọn phong cách ảnh đổi thành `Phong cách ảnh` kèm hint “Quyết định màu sắc, ánh sáng… không phải nội dung bài viết”; dòng provider đổi sang câu plain language (`Đang dùng: … · … · {size}. Đổi trong Cài đặt → Model AI.`); nút `Tạo ảnh` dùng derived `hasDraft` thay cho biểu thức `!title.trim() && !body.trim()` (hành vi không đổi) và hint đổi theo trạng thái (chưa có bài / đang bật ảnh tự động / tạo 1 ảnh); result card thêm dòng `Ảnh đã lưu trong Thư viện media.`; hàng `Gắn media` thêm hint về nút `Chọn media`; subtitle trang và hint checkbox viết lại cho người mới.
+- `src/styles.css` — thêm block `.ai-guide` (nền `#f6f5ff`, viền `#e1ddfa`, `line-height: 1.4` để hộp cao ~204px, không vượt giới hạn 210px ở viewport suite).
+- `e2e/ai.spec.ts` — thêm test `AI Content explains image generation to a first-time user`: kiểm tra nội dung hộp `.ai-guide` (nguồn ảnh, không cần prompt, `Cách 1`/`Cách 2`, `Thư viện media`), label `Phong cách ảnh` + hint màu sắc/ánh sáng, hint `Chọn media`/`ảnh/video có sẵn`, pill `Tuỳ chọn` không phải button, nút `Tạo ảnh` disabled khi chưa có bài + hint tương ứng, hộp cao ≤ 210px, và sau khi tạo nội dung thì hint đổi và nút bật lại.
+- `README.md` — mục `Tạo ảnh minh hoạ bằng AI` cập nhật theo copy mới: cột `Ảnh minh hoạ AI`, hộp hướng dẫn trong app (`Cách 1 — Tự động`/`Cách 2 — Thủ công`), `Phong cách ảnh` (màu sắc/ánh sáng, không phải nội dung), “không cần prompt ảnh riêng”, ảnh tự lưu Thư viện media + tự gắn, nút `Tạo ảnh` để tạo lại/retry.
 - Không đổi backend, IPC, payload `generate_content`/`generate_image`, dependency hay cấu hình.
 
 ### Verified
 - `npm run lint` — exit 0.
 - `npm run build` — success (Vite 8.2.2).
-- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/ai.spec.ts` — 8 passed / 0 failed.
-- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts` — 54 passed / 0 failed (53 test cũ + 1 test layout mới).
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/ai.spec.ts` — 9 passed / 0 failed.
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts` — 55 passed / 0 failed (53 test cũ + test layout + test hướng dẫn ảnh mới).
 
 ### Unverified
 - Chưa kiểm tra thủ công trên ứng dụng Tauri Desktop với provider ảnh thật; E2E chỉ chạy ở chế độ mock.

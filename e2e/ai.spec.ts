@@ -389,4 +389,41 @@ test.describe('AI generate_content E2E (real server)', () => {
     const graphAfterSecondSwitch: string[] = await page.evaluate(() => (window as any).__GRAPH_CALLS__);
     expect(graphAfterSecondSwitch).toHaveLength(graphCountAfterReport);
   });
+
+  test('AI Content explains image generation to a first-time user', async ({ page }) => {
+    await page.getByRole('button', { name: 'AI Content', exact: true }).click();
+
+    const guide = page.locator('.ai-guide');
+    await expect(guide).toHaveCount(1);
+    await expect(guide).toBeVisible();
+    await expect(guide).toContainText('Tiêu đề + Nội dung');
+    await expect(guide).toContainText('không cần viết prompt');
+    await expect(guide).toContainText('Cách 1');
+    await expect(guide).toContainText('Cách 2');
+    await expect(guide).toContainText('Thư viện media');
+
+    const imageCol = page.locator('.ai-image-col');
+    await expect(imageCol.getByText('Phong cách ảnh', { exact: true })).toBeVisible();
+    await expect(imageCol).toContainText('Quyết định màu sắc, ánh sáng');
+    await expect(imageCol).toContainText('ảnh/video có sẵn');
+    await expect(page.getByRole('button', { name: 'Tuỳ chọn', exact: true })).toHaveCount(0);
+
+    const manual = page.getByRole('button', { name: 'Tạo ảnh', exact: true });
+    await expect(manual).toHaveCount(1);
+    await expect(manual).toBeDisabled();
+    await expect(page.getByText('Nhập Tiêu đề hoặc Nội dung ở cột trái để bật nút này.')).toBeVisible();
+
+    const guideBox = await guide.boundingBox();
+    expect(guideBox).toBeTruthy();
+    expect(guideBox!.height).toBeLessThanOrEqual(210);
+
+    await page.getByPlaceholder('VD: Bí quyết năng lượng buổi sáng cho dân văn phòng...').fill('Bí quyết năng lượng buổi sáng');
+    await page.getByRole('button', { name: 'Tạo nội dung', exact: true }).click();
+    await expect(page.getByText('Đã tạo nội dung')).toBeVisible();
+
+    await expect(page.getByText('Tạo 1 ảnh từ Tiêu đề + Nội dung hiện tại.')).toBeVisible();
+    await expect(page.getByText('Nhập Tiêu đề hoặc Nội dung ở cột trái để bật nút này.')).toHaveCount(0);
+    await expect(manual).toBeEnabled();
+    await expect(manual).toHaveCount(1);
+  });
 });

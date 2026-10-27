@@ -761,6 +761,7 @@ function AiContentPage() {
   const modelPlaceholder = effectiveDefaultModel ? `Mặc định: ${effectiveDefaultModel}` : 'Mặc định của provider'
   const selectedImageStyle = imageStyles.find(s => s.id === selectedImageStyleId) || null
   const imageStylePreview = ((selectedImageStyle && selectedImageStyle.content) || '').replace(/\s+/g, ' ').trim()
+  const hasDraft = !!(title.trim() || body.trim())
   const activeImageProviderId = imageConfig.providerId || (activeProvider && activeProvider.id) || ''
   const imageProvider = imageProviders.find(p => p.id === activeImageProviderId) || null
 
@@ -1071,7 +1072,7 @@ function AiContentPage() {
   }
 
   return <section className="media-page">
-    <div className="page-heading"><div><p>AI CONTENT</p><h1>Tạo nội dung với AI</h1><span>Nhập prompt, chọn style, tạo nội dung với AI provider đã cấu hình.</span></div></div>
+    <div className="page-heading"><div><p>AI CONTENT</p><h1>Tạo nội dung với AI</h1><span>Nhập prompt để AI viết bài; bật tuỳ chọn ảnh nếu bạn muốn có ảnh minh hoạ.</span></div></div>
     {!desktop && <div className="desktop-notice"><HardDrive size={23}/><div><strong>Hãy mở bằng ứng dụng FlowPost AI Desktop</strong><span>Chức năng AI chỉ hoạt động trong bản Tauri.</span></div></div>}
     {err && <div className="error-box">{err}</div>}
     {styleWarn && <div className="error-box" style={{background:'#fff3cd', borderColor:'#ffc107', color:'#664d03'}}>
@@ -1111,7 +1112,7 @@ function AiContentPage() {
               <input type="checkbox" checked={autoImage} onChange={e=>setAutoImage(e.target.checked)} disabled={!desktop || busy} />
               Tạo ảnh minh hoạ bằng AI
             </label>
-            <div style={{fontSize:12, color:'#777', marginTop:4}}>Bật để nút “Tạo nội dung” đổi thành “Tạo nội dung + Ảnh AI” và tự tạo 1 ảnh ngay sau khi có nội dung.</div>
+            <div style={{fontSize:12, color:'#777', marginTop:4}}>Bật để nút “Tạo nội dung” đổi thành “Tạo nội dung + Ảnh AI”: một lần bấm tạo cả bài viết và 1 ảnh minh hoạ từ nội dung đó.</div>
           </div>
           <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 160px', gap:12}}>
             <div>
@@ -1159,24 +1160,45 @@ function AiContentPage() {
           </div>
         </div>
         <div className="ai-image-col">
-          <div style={{fontSize:14, fontWeight:700}}>Tạo ảnh AI</div>
-          {!autoImage && <div style={{fontSize:12, color:'#777'}}>Tick “Tạo ảnh minh hoạ bằng AI” ở cột trái để ảnh được tạo tự động ngay sau nội dung — không cần bấm “Tạo ảnh”.</div>}
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            <div style={{fontSize:14,fontWeight:700}}>Ảnh minh hoạ AI</div>
+            <span style={{fontSize:11,fontWeight:600,color:'#6b6b76',background:'#f1f0f6',borderRadius:999,padding:'2px 8px'}}>Tuỳ chọn</span>
+          </div>
+          <div className="ai-guide">
+            <p>Nguồn tạo ảnh: <strong>Tiêu đề + Nội dung</strong> bài viết và phong cách ảnh bên dưới.</p>
+            <p><strong>Bạn không cần viết prompt ảnh riêng.</strong></p>
+            <ol>
+              <li><strong>Cách 1 — Tự động:</strong> tick “Tạo ảnh minh hoạ bằng AI” ở cột trái rồi bấm “Tạo nội dung + Ảnh AI”; ảnh tạo ngay sau nội dung.</li>
+              <li><strong>Cách 2 — Thủ công:</strong> đã có Tiêu đề/Nội dung thì bấm “Tạo ảnh” bên dưới — dùng khi muốn tạo lại ảnh sau khi sửa bài.</li>
+            </ol>
+            <p>Ảnh tự lưu vào <strong>Thư viện media</strong> và tự gắn vào bài.</p>
+          </div>
           <div>
-            <label style={{fontSize:13, fontWeight:700}}>Style ảnh</label>
-            <div style={{display:'flex', gap:6, marginTop:6, maxWidth:560}}>
+            <label style={{fontSize:13,fontWeight:700}}>Phong cách ảnh</label>
+            <div style={{fontSize:12,color:'#777',marginTop:2,marginBottom:6}}>Quyết định màu sắc, ánh sáng, không khí của ảnh — không phải nội dung bài viết.</div>
+            <div style={{display:'flex', gap:6, maxWidth:560}}>
               <select value={selectedImageStyleId} onChange={e=>handleSelectImageStyle(e.target.value)} disabled={!desktop || imageBusy || imageStyleBusy} style={{flex:1, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px'}}>
                 {imageStyles.length ? imageStyles.map(s => <option key={s.id} value={s.id}>{s.name}</option>) : <option value="">Mở app desktop để tải style ảnh</option>}
               </select>
               <button className="outline" onClick={openEditImageStyleModal} disabled={!desktop || imageBusy || imageStyleBusy || !selectedImageStyleId} style={{height:36}}><Pencil size={14}/> Sửa</button>
               <button className="outline" onClick={openCreateImageStyleModal} disabled={!desktop || imageBusy || imageStyleBusy} style={{height:36}}><Plus size={14}/> Thêm</button>
             </div>
-            <div style={{fontSize:12, color:'#999', marginTop:4, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}>{imageStylePreview || 'Chưa có nội dung style ảnh'}</div>
+            <div style={{fontSize:12, color:'#999', marginTop:4, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}>{imageStylePreview || 'Chưa chọn phong cách ảnh'}</div>
           </div>
-          <div style={{fontSize:13, color:'#555'}}>Ảnh: <b>{imageProvider?.displayName || 'Theo provider AI content'}</b> • <b>{imageConfig.model.trim() || imageProvider?.defaultImageModel || 'model mặc định'}</b> • {imageConfig.size} — cấu hình trong Cài đặt → tab Model AI.</div>
+          <div style={{fontSize:12,color:'#777',marginTop:6}}>
+            Đang dùng: <b>{imageProvider?.displayName || 'Theo provider AI content'}</b> · <b>{imageConfig.model.trim() || imageProvider?.defaultImageModel || 'model mặc định'}</b> · {imageConfig.size}. Đổi trong Cài đặt → Model AI.
+          </div>
           <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
-            <button className="primary" onClick={()=>generateImageFor(title, body)} disabled={!desktop || imageBusy || busy || (!title.trim() && !body.trim())} style={{height:36}}><Sparkles size={16}/> {imageBusy ? 'Đang tạo ảnh...' : (imageErr ? 'Thử tạo lại ảnh' : 'Tạo ảnh')}</button>
-            <span style={{fontSize:12, color:'#999'}}>Cần có Tiêu đề hoặc Nội dung. Ảnh tối đa 10MB, định dạng PNG/JPEG/WEBP/GIF.</span>
+            <button className="primary" onClick={()=>generateImageFor(title, body)} disabled={!desktop || imageBusy || busy || !hasDraft} style={{height:36}}><Sparkles size={16}/> {imageBusy ? 'Đang tạo ảnh...' : (imageErr ? 'Thử tạo lại ảnh' : 'Tạo ảnh')}</button>
           </div>
+          <div style={{fontSize:12,color:'#777',marginTop:6}}>
+            {!hasDraft
+              ? 'Nhập Tiêu đề hoặc Nội dung ở cột trái để bật nút này.'
+              : autoImage
+                ? 'Ảnh sẽ tự tạo sau khi bấm “Tạo nội dung + Ảnh AI”. Nút này dùng để tạo lại ảnh.'
+                : 'Tạo 1 ảnh từ Tiêu đề + Nội dung hiện tại.'}
+          </div>
+          <div style={{fontSize:12,color:'#999',marginTop:2}}>Ảnh PNG/JPEG/WEBP/GIF, tối đa 10MB.</div>
           {imageErr && <div className="error-box">{imageErr}</div>}
           {imageResult && <div style={{display:'flex', gap:12, alignItems:'center', border:'1px solid #e8e8ed', borderRadius:10, padding:10, background:'#fff'}}>
             {imageResult.url ? <img src={imageResult.url} alt={imageResult.name} style={{width:96, height:96, objectFit:'cover', borderRadius:8, border:'1px solid #eee'}}/> : <div style={{width:96, height:96, borderRadius:8, background:'#f1f0f6', display:'grid', placeItems:'center', fontSize:12, color:'#777'}}>Đã tạo</div>}
@@ -1186,12 +1208,16 @@ function AiContentPage() {
               <span style={{fontSize:12, color:'#777'}}>Model: {imageResult.model}</span>
               {imageResult.savedCopyPath && <span style={{fontSize:12, color:'#2e6b2e'}}>Bản sao: {imageResult.savedCopyPath}</span>}
               {imageResult.copyWarning && <span style={{fontSize:12, color:'#b55041'}}>{imageResult.copyWarning}</span>}
+              <div style={{fontSize:12,color:'#999',marginTop:4}}>Ảnh đã lưu trong Thư viện media.</div>
             </div>
           </div>}
           <div>
             <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
               <label style={{fontSize:14, fontWeight:700}}>Gắn media ({mediaIds.length})</label>
               <button className="outline" onClick={()=>setShowPicker(!showPicker)} disabled={!desktop} style={{height:32}}><Images size={14}/> {showPicker ? 'Ẩn' : 'Chọn'} media</button>
+            </div>
+            <div style={{fontSize:12,color:'#777',marginTop:4}}>
+              Ảnh AI tự gắn vào đây. Bấm “Chọn media” để thêm ảnh/video có sẵn trong thư viện.
             </div>
             {showPicker && <div className="media-grid" style={{marginTop:10, gridTemplateColumns:'repeat(3,1fr)'}}>{mediaOptions.length ? mediaOptions.map(m => <article key={m.id} className="media-card" style={{border: mediaIds.includes(m.id) ? '2px solid #6558d6' : '1px solid #e8e8ed', cursor:'pointer'}} onClick={()=>toggleMedia(m.id)}><div className="media-preview" style={{aspectRatio:1}}>{m.mediaType==='image'?<img src={m.url} alt={m.name}/>:<><video src={m.url}/><div className="video-badge"><Film size={12}/> VIDEO</div></>}</div><div className="media-info" style={{padding:8}}><strong style={{fontSize:13}}>{m.name}</strong><span style={{fontSize:12}}>{mediaIds.includes(m.id) ? '✓ Đã chọn' : m.extension.toUpperCase()}</span></div></article>) : <span style={{fontSize:13, color:'#777'}}>Thư viện trống — hãy nhập media trước</span>}</div>}
             {mediaIds.length>0 && <div style={{fontSize:13, color:'#6558d6', marginTop:6}}>Đã chọn {mediaIds.length} media</div>}
