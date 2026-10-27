@@ -91,7 +91,9 @@ FlowPost AI dùng token do bạn tự tạo và dán vào ứng dụng. Token c�
 
 ## Tạo ảnh minh hoạ bằng AI
 
-- Trong `AI Content`, tick `Tạo ảnh minh hoạ bằng AI` (mặc định tắt). Sau khi AI trả về bài viết, ứng dụng gọi model tạo ảnh để sinh **1 ảnh** dựa trên tiêu đề + nội dung bài viết và `Style ảnh` đang chọn.
+- Trang `AI Content` chia 2 cột: cột trái để tạo nội dung (chủ đề, prompt, style/model, tiêu đề, nội dung) và cột phải để tạo ảnh AI (style ảnh, provider/model, nút `Tạo ảnh`, ảnh xem trước và media). Footer `Xóa form`/`Lưu vào kho` nằm dưới cả 2 cột.
+- Tick `Tạo ảnh minh hoạ bằng AI` (mặc định tắt) **trước khi** tạo nội dung: nút `Tạo nội dung` đổi thành `Tạo nội dung + Ảnh AI`. Một lần bấm sẽ tạo nội dung rồi tự tạo **1 ảnh** ngay sau đó, dựa trên tiêu đề + nội dung bài viết và `Style ảnh` đang chọn — không cần bấm `Tạo ảnh`. Không tick thì chỉ tạo nội dung.
+- Nút `Tạo ảnh` ở cột phải vẫn còn để tạo lại ảnh cho bài đang mở (ví dụ sau khi sửa nội dung) hoặc thử lại khi lần tạo ảnh trước bị lỗi.
 - `Style ảnh` là danh sách riêng (`image_styles.json`), có 3 style mặc định (`Điện ảnh`, `Tối giản`, `Minh hoạ phẳng`) và cho phép thêm/sửa/nhân bản/xóa/khôi phục mặc định. Style ảnh chỉ chứa mô tả phong cách, không phải nội dung bài viết.
 - Chọn provider/model tạo ảnh: `Cài đặt` → tab `Model AI` → mục `Model tạo ảnh` (provider, model, kích thước, thư mục lưu). Chọn provider/model viết content ở cùng tab, mục `Model viết content`; AI Content vẫn có thể đổi model cho từng bài.
 - Ứng dụng gọi `POST {base}/images/generations` theo chuẩn OpenAI-compatible với `n=1`, `response_format=b64_json`; nếu provider trả `url`, backend tự tải ảnh về (không gửi API key tới host tải ảnh).

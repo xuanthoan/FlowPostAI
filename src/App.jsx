@@ -906,7 +906,7 @@ function AiContentPage() {
       return
     }
     setStyleWarn('')
-    setBusy(true); setErr(''); setMsg(''); setPromptUsed('')
+    setBusy(true); setErr(''); setMsg(''); setPromptUsed(''); setImageErr('')
     try {
       const topicLists = (topics.find(t => t.id === selectedTopicId)?.lists) || []
       const chosenModel = model.trim()
@@ -917,7 +917,6 @@ function AiContentPage() {
       setBody(res.body || '')
       setPromptUsed(res.promptUsed || res.prompt || '')
       setMsg('Đã tạo nội dung')
-      setBusy(false)
       if (autoImage) {
         if (imageResult && imageResult.mediaId) {
           setMediaIds(prev => prev.filter(x => x !== imageResult.mediaId))
@@ -1084,110 +1083,120 @@ function AiContentPage() {
     </div>}
     {msg && <div className="desktop-notice" style={{background:'#eef7ee', borderColor:'#cde9cd', color:'#2e6b2e'}}><CircleCheck size={18}/><span>{msg}</span></div>}
     <div className="panel" style={{padding:20, display:'flex', flexDirection:'column', gap:16}}>
-      <div>
-        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, flexWrap:'wrap'}}>
-          <label style={{fontSize:14, fontWeight:700}}>Chủ đề</label>
-          <div style={{display:'flex', gap:8}}>
-            <button className="outline" onClick={openEditTopicModal} disabled={!desktop || busy || topicBusy || !selectedTopicId} style={{height:32}}><Pencil size={14}/> Sửa</button>
-            <button className="outline" onClick={openCreateTopicModal} disabled={!desktop || busy || topicBusy} style={{height:32}}><Plus size={14}/> Thêm chủ đề</button>
-          </div>
-        </div>
-        <select value={selectedTopicId} onChange={e=>handleSelectTopic(e.target.value)} disabled={!desktop || busy || topicBusy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:6}}>
-          <option value="">Tự do (nhập prompt trực tiếp)</option>
-          {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-        </select>
-        <div style={{display:'flex', alignItems:'center', gap:6, marginTop:6, color:'#6b6b76', fontSize:13, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}><FileText size={14}/><span style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{topicPreview}</span></div>
-        <div style={{fontSize:12, color:'#999', marginTop:4}}>Chỉnh sửa prompt bên dưới không tự lưu vào chủ đề; dùng nút Sửa để cập nhật chủ đề.</div>
-      </div>
-      <div>
-        <label style={{fontSize:14, fontWeight:700}}>Prompt *</label>
-        <textarea spellCheck={false} placeholder="VD: Bí quyết năng lượng buổi sáng cho dân văn phòng..." value={prompt} onChange={e=>setPrompt(e.target.value)} disabled={!desktop || busy} style={{width:'100%', minHeight:90, border:'1px solid #e2e1e7', borderRadius:8, padding:12, fontSize:14, marginTop:6, resize:'vertical'}}/>
-        <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{prompt.length} ký tự</div>
-        {promptUsed && promptUsed !== prompt && <div style={{fontSize:12, color:'#999', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}>Đã dùng: {promptUsed}</div>}
-      </div>
-      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 160px', gap:12}}>
-        <div>
-          <label style={{fontSize:14, fontWeight:700}}>Style</label>
-          <select value={selectedStyleId} onChange={e=>handleSelectStyle(e.target.value)} disabled={!desktop || busy || styleBusy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:6}}>
-            {styles.length ? styles.map(s => <option key={s.id} value={s.id}>{s.name}</option>) : <option value="">Mở app desktop để tải style</option>}
-          </select>
-          {!desktop && <div style={{fontSize:12, color:'#999', marginTop:4}}>Mở app desktop để tải style</div>}
-        </div>
-        <div>
-          <label style={{fontSize:14, fontWeight:700}}>Model</label>
-          <div style={{marginTop:6}}>
-            <SuggestInput ariaLabel="Model" placeholder={modelPlaceholder} value={model} onChange={setModel} options={modelOptions}/>
-          </div>
-          <div style={{fontSize:12, color:'#999', marginTop:4}}>Để trống để dùng model mặc định của provider.</div>
-        </div>
-        <div style={{display:'flex', alignItems:'flex-end'}}>
-          <button className="primary" onClick={() => generate()} disabled={!desktop || busy || !prompt.trim()} style={{width:'100%', height:36, justifyContent:'center'}}><Sparkles size={16}/> {busy ? 'Đang tạo...' : 'Tạo nội dung'}</button>
-        </div>
-      </div>
-      <div style={{border:'1px solid #e8e8ed', borderRadius:10, padding:12, display:'flex', flexDirection:'column', gap:4, background:'#fafaff'}}>
-        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, flexWrap:'wrap'}}>
-          <div style={{display:'flex', alignItems:'center', gap:8}}>
-            <span style={{fontSize:13, fontWeight:700}}>Cấu hình style</span>
-            <span style={{fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:999, background: selectedStyle && selectedStyle.builtin ? '#efeeff' : '#eef7ee', color: selectedStyle && selectedStyle.builtin ? '#6558d6' : '#2e6b2e'}}>{selectedStyle && selectedStyle.builtin ? 'Mặc định' : 'Tùy chỉnh'}</span>
-          </div>
-          <div style={{display:'flex', gap:8}}>
-            <button className="outline" onClick={openEditStyleModal} disabled={!desktop || busy || styleBusy || !selectedStyleId} style={{height:32}}><Pencil size={14}/> Sửa</button>
-            <button className="outline" onClick={openCreateStyleModal} disabled={!desktop || busy || styleBusy} style={{height:32}}><Plus size={14}/> Thêm style</button>
-          </div>
-        </div>
-        <div style={{display:'flex', alignItems:'center', gap:6, marginTop:6, color:'#6b6b76', fontSize:13, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}><FileText size={14}/><span style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{stylePreview || 'Chưa có nội dung style'}</span></div>
-      </div>
-      <div style={{height:1, background:'#eee'}}/>
-      <div>
-        <label style={{fontSize:14, fontWeight:700}}>Tiêu đề</label>
-        <input spellCheck={false} placeholder="Tiêu đề sẽ hiện sau khi Tạo..." value={title} onChange={e=>setTitle(e.target.value)} disabled={busy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
-      </div>
-      <div>
-        <label style={{fontSize:14, fontWeight:700}}>Nội dung</label>
-        <textarea spellCheck={false} placeholder="Nội dung sẽ hiện sau khi Tạo — bạn có thể chỉnh sửa..." value={body} onChange={e=>setBody(e.target.value)} disabled={busy} style={{width:'100%', minHeight:160, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical'}}/>
-        <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{charCount(body)} ký tự</div>
-      </div>
-      <div style={{border:'1px solid #e8e8ed', borderRadius:10, padding:12, display:'flex', flexDirection:'column', gap:12, background:'#fafaff'}}>
-        <label style={{display:'flex', alignItems:'center', gap:8, fontSize:14, fontWeight:700, cursor:'pointer'}}>
-          <input type="checkbox" checked={autoImage} onChange={e=>setAutoImage(e.target.checked)} disabled={!desktop || busy} />
-          Tạo ảnh minh hoạ bằng AI
-        </label>
-        <div style={{fontSize:12, color:'#777'}}>Ảnh được tạo sau khi có nội dung, dựa trên nội dung bài viết và style ảnh bên dưới. Mỗi lần tạo 1 ảnh.</div>
-        <div>
-          <label style={{fontSize:13, fontWeight:700}}>Style ảnh</label>
-          <div style={{display:'flex', gap:6, marginTop:6, maxWidth:560}}>
-            <select value={selectedImageStyleId} onChange={e=>handleSelectImageStyle(e.target.value)} disabled={!desktop || imageBusy || imageStyleBusy} style={{flex:1, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px'}}>
-              {imageStyles.length ? imageStyles.map(s => <option key={s.id} value={s.id}>{s.name}</option>) : <option value="">Mở app desktop để tải style ảnh</option>}
+      <div className="ai-grid">
+        <div className="ai-compose">
+          <div>
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, flexWrap:'wrap'}}>
+              <label style={{fontSize:14, fontWeight:700}}>Chủ đề</label>
+              <div style={{display:'flex', gap:8}}>
+                <button className="outline" onClick={openEditTopicModal} disabled={!desktop || busy || topicBusy || !selectedTopicId} style={{height:32}}><Pencil size={14}/> Sửa</button>
+                <button className="outline" onClick={openCreateTopicModal} disabled={!desktop || busy || topicBusy} style={{height:32}}><Plus size={14}/> Thêm chủ đề</button>
+              </div>
+            </div>
+            <select value={selectedTopicId} onChange={e=>handleSelectTopic(e.target.value)} disabled={!desktop || busy || topicBusy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:6}}>
+              <option value="">Tự do (nhập prompt trực tiếp)</option>
+              {topics.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
-            <button className="outline" onClick={openEditImageStyleModal} disabled={!desktop || imageBusy || imageStyleBusy || !selectedImageStyleId} style={{height:36}}><Pencil size={14}/> Sửa</button>
-            <button className="outline" onClick={openCreateImageStyleModal} disabled={!desktop || imageBusy || imageStyleBusy} style={{height:36}}><Plus size={14}/> Thêm</button>
+            <div style={{display:'flex', alignItems:'center', gap:6, marginTop:6, color:'#6b6b76', fontSize:13, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}><FileText size={14}/><span style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{topicPreview}</span></div>
+            <div style={{fontSize:12, color:'#999', marginTop:4}}>Chỉnh sửa prompt bên dưới không tự lưu vào chủ đề; dùng nút Sửa để cập nhật chủ đề.</div>
           </div>
-          <div style={{fontSize:12, color:'#999', marginTop:4, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}>{imageStylePreview || 'Chưa có nội dung style ảnh'}</div>
-        </div>
-        <div style={{fontSize:13, color:'#555'}}>Ảnh: <b>{imageProvider?.displayName || 'Theo provider AI content'}</b> • <b>{imageConfig.model.trim() || imageProvider?.defaultImageModel || 'model mặc định'}</b> • {imageConfig.size} — cấu hình trong Cài đặt → tab Model AI.</div>
-        <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
-          <button className="primary" onClick={()=>generateImageFor(title, body)} disabled={!desktop || imageBusy || busy || (!title.trim() && !body.trim())} style={{height:36}}><Sparkles size={16}/> {imageBusy ? 'Đang tạo ảnh...' : (imageErr ? 'Thử tạo lại ảnh' : 'Tạo ảnh')}</button>
-          <span style={{fontSize:12, color:'#999'}}>Cần có Tiêu đề hoặc Nội dung. Ảnh tối đa 10MB, định dạng PNG/JPEG/WEBP/GIF.</span>
-        </div>
-        {imageErr && <div className="error-box">{imageErr}</div>}
-        {imageResult && <div style={{display:'flex', gap:12, alignItems:'center', border:'1px solid #e8e8ed', borderRadius:10, padding:10, background:'#fff'}}>
-          {imageResult.url ? <img src={imageResult.url} alt={imageResult.name} style={{width:96, height:96, objectFit:'cover', borderRadius:8, border:'1px solid #eee'}}/> : <div style={{width:96, height:96, borderRadius:8, background:'#f1f0f6', display:'grid', placeItems:'center', fontSize:12, color:'#777'}}>Đã tạo</div>}
-          <div style={{display:'flex', flexDirection:'column', gap:2, minWidth:0}}>
-            <strong style={{fontSize:13}}>Đã gắn vào bài viết</strong>
-            <span style={{fontSize:12, color:'#555', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{imageResult.name}</span>
-            <span style={{fontSize:12, color:'#777'}}>Model: {imageResult.model}</span>
-            {imageResult.savedCopyPath && <span style={{fontSize:12, color:'#2e6b2e'}}>Bản sao: {imageResult.savedCopyPath}</span>}
-            {imageResult.copyWarning && <span style={{fontSize:12, color:'#b55041'}}>{imageResult.copyWarning}</span>}
+          <div>
+            <label style={{fontSize:14, fontWeight:700}}>Prompt *</label>
+            <textarea spellCheck={false} placeholder="VD: Bí quyết năng lượng buổi sáng cho dân văn phòng..." value={prompt} onChange={e=>setPrompt(e.target.value)} disabled={!desktop || busy} style={{width:'100%', minHeight:90, border:'1px solid #e2e1e7', borderRadius:8, padding:12, fontSize:14, marginTop:6, resize:'vertical'}}/>
+            <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{prompt.length} ký tự</div>
+            {promptUsed && promptUsed !== prompt && <div style={{fontSize:12, color:'#999', overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}>Đã dùng: {promptUsed}</div>}
           </div>
-        </div>}
-      </div>
-      <div>
-        <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
-          <label style={{fontSize:14, fontWeight:700}}>Gắn media ({mediaIds.length})</label>
-          <button className="outline" onClick={()=>setShowPicker(!showPicker)} disabled={!desktop} style={{height:32}}><Images size={14}/> {showPicker ? 'Ẩn' : 'Chọn'} media</button>
+          <div style={{border:'1px solid #e8e8ed', borderRadius:10, padding:'10px 12px', background:'#fafaff'}}>
+            <label style={{display:'flex', alignItems:'center', gap:8, fontSize:14, fontWeight:700, cursor:'pointer'}}>
+              <input type="checkbox" checked={autoImage} onChange={e=>setAutoImage(e.target.checked)} disabled={!desktop || busy} />
+              Tạo ảnh minh hoạ bằng AI
+            </label>
+            <div style={{fontSize:12, color:'#777', marginTop:4}}>Bật để nút “Tạo nội dung” đổi thành “Tạo nội dung + Ảnh AI” và tự tạo 1 ảnh ngay sau khi có nội dung.</div>
+          </div>
+          <div style={{display:'grid', gridTemplateColumns:'1fr 1fr 160px', gap:12}}>
+            <div>
+              <label style={{fontSize:14, fontWeight:700}}>Style</label>
+              <select value={selectedStyleId} onChange={e=>handleSelectStyle(e.target.value)} disabled={!desktop || busy || styleBusy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px', marginTop:6}}>
+                {styles.length ? styles.map(s => <option key={s.id} value={s.id}>{s.name}</option>) : <option value="">Mở app desktop để tải style</option>}
+              </select>
+              {!desktop && <div style={{fontSize:12, color:'#999', marginTop:4}}>Mở app desktop để tải style</div>}
+            </div>
+            <div>
+              <label style={{fontSize:14, fontWeight:700}}>Model</label>
+              <div style={{marginTop:6}}>
+                <SuggestInput ariaLabel="Model" placeholder={modelPlaceholder} value={model} onChange={setModel} options={modelOptions}/>
+              </div>
+              <div style={{fontSize:12, color:'#999', marginTop:4}}>Để trống để dùng model mặc định của provider.</div>
+            </div>
+            <div style={{display:'flex', alignItems:'flex-end'}}>
+              <button className="primary" onClick={() => generate()} disabled={!desktop || busy || !prompt.trim()} style={{width:'100%', height:36, justifyContent:'center'}}><Sparkles size={16}/> {busy
+                ? (autoImage ? 'Đang tạo nội dung + ảnh...' : 'Đang tạo...')
+                : (autoImage ? 'Tạo nội dung + Ảnh AI' : 'Tạo nội dung')}</button>
+            </div>
+          </div>
+          <div style={{border:'1px solid #e8e8ed', borderRadius:10, padding:12, display:'flex', flexDirection:'column', gap:4, background:'#fafaff'}}>
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', gap:8, flexWrap:'wrap'}}>
+              <div style={{display:'flex', alignItems:'center', gap:8}}>
+                <span style={{fontSize:13, fontWeight:700}}>Cấu hình style</span>
+                <span style={{fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:999, background: selectedStyle && selectedStyle.builtin ? '#efeeff' : '#eef7ee', color: selectedStyle && selectedStyle.builtin ? '#6558d6' : '#2e6b2e'}}>{selectedStyle && selectedStyle.builtin ? 'Mặc định' : 'Tùy chỉnh'}</span>
+              </div>
+              <div style={{display:'flex', gap:8}}>
+                <button className="outline" onClick={openEditStyleModal} disabled={!desktop || busy || styleBusy || !selectedStyleId} style={{height:32}}><Pencil size={14}/> Sửa</button>
+                <button className="outline" onClick={openCreateStyleModal} disabled={!desktop || busy || styleBusy} style={{height:32}}><Plus size={14}/> Thêm style</button>
+              </div>
+            </div>
+            <div style={{display:'flex', alignItems:'center', gap:6, marginTop:6, color:'#6b6b76', fontSize:13, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}><FileText size={14}/><span style={{overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{stylePreview || 'Chưa có nội dung style'}</span></div>
+          </div>
+          <div style={{height:1, background:'#eee'}}/>
+          <div>
+            <label style={{fontSize:14, fontWeight:700}}>Tiêu đề</label>
+            <input spellCheck={false} placeholder="Tiêu đề sẽ hiện sau khi Tạo..." value={title} onChange={e=>setTitle(e.target.value)} disabled={busy} style={{width:'100%', height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 12px', marginTop:6, fontSize:14}}/>
+          </div>
+          <div>
+            <label style={{fontSize:14, fontWeight:700}}>Nội dung</label>
+            <textarea spellCheck={false} placeholder="Nội dung sẽ hiện sau khi Tạo — bạn có thể chỉnh sửa..." value={body} onChange={e=>setBody(e.target.value)} disabled={busy} style={{width:'100%', minHeight:300, border:'1px solid #e2e1e7', borderRadius:8, padding:12, marginTop:6, fontSize:14, resize:'vertical'}}/>
+            <div style={{fontSize:12, color:'#999', textAlign:'right'}}>{charCount(body)} ký tự</div>
+          </div>
         </div>
-        {showPicker && <div className="media-grid" style={{marginTop:10, gridTemplateColumns:'repeat(3,1fr)'}}>{mediaOptions.length ? mediaOptions.map(m => <article key={m.id} className="media-card" style={{border: mediaIds.includes(m.id) ? '2px solid #6558d6' : '1px solid #e8e8ed', cursor:'pointer'}} onClick={()=>toggleMedia(m.id)}><div className="media-preview" style={{aspectRatio:1}}>{m.mediaType==='image'?<img src={m.url} alt={m.name}/>:<><video src={m.url}/><div className="video-badge"><Film size={12}/> VIDEO</div></>}</div><div className="media-info" style={{padding:8}}><strong style={{fontSize:13}}>{m.name}</strong><span style={{fontSize:12}}>{mediaIds.includes(m.id) ? '✓ Đã chọn' : m.extension.toUpperCase()}</span></div></article>) : <span style={{fontSize:13, color:'#777'}}>Thư viện trống — hãy nhập media trước</span>}</div>}
-        {mediaIds.length>0 && <div style={{fontSize:13, color:'#6558d6', marginTop:6}}>Đã chọn {mediaIds.length} media</div>}
+        <div className="ai-image-col">
+          <div style={{fontSize:14, fontWeight:700}}>Tạo ảnh AI</div>
+          {!autoImage && <div style={{fontSize:12, color:'#777'}}>Tick “Tạo ảnh minh hoạ bằng AI” ở cột trái để ảnh được tạo tự động ngay sau nội dung — không cần bấm “Tạo ảnh”.</div>}
+          <div>
+            <label style={{fontSize:13, fontWeight:700}}>Style ảnh</label>
+            <div style={{display:'flex', gap:6, marginTop:6, maxWidth:560}}>
+              <select value={selectedImageStyleId} onChange={e=>handleSelectImageStyle(e.target.value)} disabled={!desktop || imageBusy || imageStyleBusy} style={{flex:1, height:36, border:'1px solid #e2e1e7', borderRadius:8, padding:'0 8px'}}>
+                {imageStyles.length ? imageStyles.map(s => <option key={s.id} value={s.id}>{s.name}</option>) : <option value="">Mở app desktop để tải style ảnh</option>}
+              </select>
+              <button className="outline" onClick={openEditImageStyleModal} disabled={!desktop || imageBusy || imageStyleBusy || !selectedImageStyleId} style={{height:36}}><Pencil size={14}/> Sửa</button>
+              <button className="outline" onClick={openCreateImageStyleModal} disabled={!desktop || imageBusy || imageStyleBusy} style={{height:36}}><Plus size={14}/> Thêm</button>
+            </div>
+            <div style={{fontSize:12, color:'#999', marginTop:4, overflow:'hidden', whiteSpace:'nowrap', textOverflow:'ellipsis'}}>{imageStylePreview || 'Chưa có nội dung style ảnh'}</div>
+          </div>
+          <div style={{fontSize:13, color:'#555'}}>Ảnh: <b>{imageProvider?.displayName || 'Theo provider AI content'}</b> • <b>{imageConfig.model.trim() || imageProvider?.defaultImageModel || 'model mặc định'}</b> • {imageConfig.size} — cấu hình trong Cài đặt → tab Model AI.</div>
+          <div style={{display:'flex', gap:8, alignItems:'center', flexWrap:'wrap'}}>
+            <button className="primary" onClick={()=>generateImageFor(title, body)} disabled={!desktop || imageBusy || busy || (!title.trim() && !body.trim())} style={{height:36}}><Sparkles size={16}/> {imageBusy ? 'Đang tạo ảnh...' : (imageErr ? 'Thử tạo lại ảnh' : 'Tạo ảnh')}</button>
+            <span style={{fontSize:12, color:'#999'}}>Cần có Tiêu đề hoặc Nội dung. Ảnh tối đa 10MB, định dạng PNG/JPEG/WEBP/GIF.</span>
+          </div>
+          {imageErr && <div className="error-box">{imageErr}</div>}
+          {imageResult && <div style={{display:'flex', gap:12, alignItems:'center', border:'1px solid #e8e8ed', borderRadius:10, padding:10, background:'#fff'}}>
+            {imageResult.url ? <img src={imageResult.url} alt={imageResult.name} style={{width:96, height:96, objectFit:'cover', borderRadius:8, border:'1px solid #eee'}}/> : <div style={{width:96, height:96, borderRadius:8, background:'#f1f0f6', display:'grid', placeItems:'center', fontSize:12, color:'#777'}}>Đã tạo</div>}
+            <div style={{display:'flex', flexDirection:'column', gap:2, minWidth:0}}>
+              <strong style={{fontSize:13}}>Đã gắn vào bài viết</strong>
+              <span style={{fontSize:12, color:'#555', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{imageResult.name}</span>
+              <span style={{fontSize:12, color:'#777'}}>Model: {imageResult.model}</span>
+              {imageResult.savedCopyPath && <span style={{fontSize:12, color:'#2e6b2e'}}>Bản sao: {imageResult.savedCopyPath}</span>}
+              {imageResult.copyWarning && <span style={{fontSize:12, color:'#b55041'}}>{imageResult.copyWarning}</span>}
+            </div>
+          </div>}
+          <div>
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+              <label style={{fontSize:14, fontWeight:700}}>Gắn media ({mediaIds.length})</label>
+              <button className="outline" onClick={()=>setShowPicker(!showPicker)} disabled={!desktop} style={{height:32}}><Images size={14}/> {showPicker ? 'Ẩn' : 'Chọn'} media</button>
+            </div>
+            {showPicker && <div className="media-grid" style={{marginTop:10, gridTemplateColumns:'repeat(3,1fr)'}}>{mediaOptions.length ? mediaOptions.map(m => <article key={m.id} className="media-card" style={{border: mediaIds.includes(m.id) ? '2px solid #6558d6' : '1px solid #e8e8ed', cursor:'pointer'}} onClick={()=>toggleMedia(m.id)}><div className="media-preview" style={{aspectRatio:1}}>{m.mediaType==='image'?<img src={m.url} alt={m.name}/>:<><video src={m.url}/><div className="video-badge"><Film size={12}/> VIDEO</div></>}</div><div className="media-info" style={{padding:8}}><strong style={{fontSize:13}}>{m.name}</strong><span style={{fontSize:12}}>{mediaIds.includes(m.id) ? '✓ Đã chọn' : m.extension.toUpperCase()}</span></div></article>) : <span style={{fontSize:13, color:'#777'}}>Thư viện trống — hãy nhập media trước</span>}</div>}
+            {mediaIds.length>0 && <div style={{fontSize:13, color:'#6558d6', marginTop:6}}>Đã chọn {mediaIds.length} media</div>}
+          </div>
+        </div>
       </div>
       <div style={{display:'flex', gap:8, justifyContent:'flex-end'}}>
         <button className="outline" onClick={()=>{setPrompt(''); setTitle(''); setBody(''); setMediaIds([]); setFreePrompt(''); setSelectedTopicId(''); setPromptUsed(''); setMsg(''); setErr(''); setStyleWarn(''); setImageResult(null); setImageErr(''); setAutoImage(false)}} disabled={busy} style={{height:36}}>Xóa form</button>

@@ -17,8 +17,11 @@ window.__IMAGE_CONFIG__ = { providerId: 'p1', model: 'img-model', saveDir: '', s
 window.__ACTIVE_CALLS__ = [];
 window.__GRAPH_CALLS__ = [];
 window.__LOCAL_CALLS__ = [];
+window.__GEN_CALLS__ = 0;
+window.__IMG_CALLS__ = 0;
 window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
   if (cmd === 'generate_content') {
+    window.__GEN_CALLS__ = (window.__GEN_CALLS__ || 0) + 1;
     const payload = args?.payload;
     window.__LAST_GENERATE_PAYLOAD__ = payload ?? null;
     if (!payload?.prompt || !payload.prompt.trim()) {
@@ -84,6 +87,7 @@ window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
   }
   if (cmd === 'pick_image_folder') return 'C:\\\\tmp\\\\flowpost';
   if (cmd === 'generate_image') {
+    window.__IMG_CALLS__ = (window.__IMG_CALLS__ || 0) + 1;
     window.__LAST_IMAGE_PAYLOAD__ = args?.payload ?? null;
     if (window.__FAIL_IMAGE__) throw new Error('AI tạo ảnh đang gặp sự cố, vui lòng thử lại.');
     const p = args?.payload ?? {};
@@ -210,7 +214,7 @@ test.describe('AI generate_content E2E (real server)', () => {
     await page.getByRole('button', { name: 'AI Content', exact: true }).click();
     await page.getByLabel('Tạo ảnh minh hoạ bằng AI').check();
     await page.getByPlaceholder('VD: Bí quyết năng lượng buổi sáng cho dân văn phòng...').fill('Bí quyết năng lượng buổi sáng');
-    await page.getByRole('button', { name: 'Tạo nội dung', exact: true }).click();
+    await page.getByRole('button', { name: 'Tạo nội dung + Ảnh AI', exact: true }).click();
     await expect(page.getByText('Đã tạo ảnh minh hoạ')).toBeVisible();
     const imgPayload: any = await page.evaluate(() => (window as any).__LAST_IMAGE_PAYLOAD__);
     expect(imgPayload).toBeTruthy();
@@ -220,6 +224,64 @@ test.describe('AI generate_content E2E (real server)', () => {
     expect(imgPayload.model).toBe('img-2');
     await expect(page.getByText('Đã gắn vào bài viết')).toBeVisible();
     await expect(page.getByText('Gắn media (1)')).toBeVisible();
+  });
+
+  test('splits AI Content into compose and image columns and merges the buttons', async ({ page }) => {
+    await page.getByRole('button', { name: 'AI Content', exact: true }).click();
+
+    await expect(page.locator('.ai-grid')).toHaveCount(1);
+    await expect(page.locator('.ai-compose')).toHaveCount(1);
+    await expect(page.locator('.ai-image-col')).toHaveCount(1);
+
+    const composeBox = await page.locator('.ai-compose').boundingBox();
+    const imageBox = await page.locator('.ai-image-col').boundingBox();
+    expect(composeBox).toBeTruthy();
+    expect(imageBox).toBeTruthy();
+    expect(composeBox!.x).toBeLessThan(imageBox!.x);
+    expect(Math.abs(composeBox!.y - imageBox!.y)).toBeLessThanOrEqual(4);
+
+    const checkbox = page.getByLabel('Tạo ảnh minh hoạ bằng AI');
+    await expect(checkbox).toBeVisible();
+    await expect(checkbox).toBeEnabled();
+
+    await page
+      .getByPlaceholder('VD: Bí quyết năng lượng buổi sáng cho dân văn phòng...')
+      .fill('Bí quyết năng lượng buổi sáng');
+
+    const plainButton = page.getByRole('button', { name: 'Tạo nội dung', exact: true });
+    await expect(plainButton).toBeVisible();
+    await expect(plainButton).toBeEnabled();
+    await expect(page.getByRole('button', { name: 'Tạo nội dung + Ảnh AI', exact: true })).toHaveCount(0);
+
+    await checkbox.check();
+    const mergedButton = page.getByRole('button', { name: 'Tạo nội dung + Ảnh AI', exact: true });
+    await expect(mergedButton).toBeVisible();
+    await expect(mergedButton).toBeEnabled();
+    await expect(mergedButton).toHaveText('Tạo nội dung + Ảnh AI');
+
+    await checkbox.uncheck();
+    await expect(page.getByRole('button', { name: 'Tạo nội dung', exact: true })).toBeVisible();
+
+    await checkbox.check();
+    await expect(page.getByRole('button', { name: 'Tạo nội dung + Ảnh AI', exact: true })).toBeVisible();
+
+    const manualImageButton = page.getByRole('button', { name: 'Tạo ảnh', exact: true });
+    await expect(manualImageButton).toHaveCount(1);
+
+    const genCallsBefore = await page.evaluate(() => (window as any).__GEN_CALLS__ || 0);
+    const imgCallsBefore = await page.evaluate(() => (window as any).__IMG_CALLS__ || 0);
+
+    await page.getByRole('button', { name: 'Tạo nội dung + Ảnh AI', exact: true }).click();
+
+    await expect(page.getByText('Đã tạo ảnh minh hoạ')).toBeVisible();
+    await expect(page.getByText('Đã gắn vào bài viết')).toBeVisible();
+    await expect(page.getByText('Gắn media (1)')).toBeVisible();
+
+    await expect.poll(() => page.evaluate(() => (window as any).__GEN_CALLS__)).toBe(genCallsBefore + 1);
+    await expect.poll(() => page.evaluate(() => (window as any).__IMG_CALLS__)).toBe(imgCallsBefore + 1);
+    await expect(manualImageButton).toHaveCount(1);
+    expect(await page.evaluate(() => (window as any).__GEN_CALLS__)).toBe(genCallsBefore + 1);
+    expect(await page.evaluate(() => (window as any).__IMG_CALLS__)).toBe(imgCallsBefore + 1);
   });
 
   test('Settings has 3 tabs and separate content/image models', async ({ page }) => {
@@ -271,7 +333,7 @@ test.describe('AI generate_content E2E (real server)', () => {
     await page.getByLabel('Tạo ảnh minh hoạ bằng AI').check();
     await page.evaluate(() => { (window as any).__FAIL_IMAGE__ = true; });
     await page.getByPlaceholder('VD: Bí quyết năng lượng buổi sáng cho dân văn phòng...').fill('Chủ đề lỗi ảnh');
-    await page.getByRole('button', { name: 'Tạo nội dung', exact: true }).click();
+    await page.getByRole('button', { name: 'Tạo nội dung + Ảnh AI', exact: true }).click();
     await expect(page.getByText('Đã tạo nội dung')).toBeVisible();
     await expect(page.getByText('AI tạo ảnh đang gặp sự cố')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Thử tạo lại ảnh' })).toBeVisible();

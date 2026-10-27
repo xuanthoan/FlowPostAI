@@ -2,6 +2,26 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased] - 2026-10-27 — Tạo nội dung + Ảnh AI trong một lần bấm
+
+### Added
+- `e2e/ai.spec.ts` — test mới `splits AI Content into compose and image columns and merges the buttons`: kiểm tra 1 `.ai-grid` gồm 1 `.ai-compose` + 1 `.ai-image-col` cùng hàng (`compose.x < imageCol.x`, lệch `y` ≤ 4px), checkbox `Tạo ảnh minh hoạ bằng AI` hiển thị và bật được trước khi tạo, nhãn nút đổi `Tạo nội dung` → `Tạo nội dung + Ảnh AI` khi tick và trả lại khi bỏ tick, một lần bấm gọi `generate_content` 1 lần rồi `generate_image` 1 lần, có `Đã tạo ảnh minh hoạ`/`Đã gắn vào bài viết`/`Gắn media (1)`, nút `Tạo ảnh` thủ công vẫn còn và không được bấm. Mock trong test thêm bộ đếm `window.__GEN_CALLS__`/`window.__IMG_CALLS__`.
+- `src/styles.css` — style `.ai-grid` (2 cột, breakpoint 1250px/980px), `.ai-compose`, `.ai-image-col`; không dùng `position:sticky`.
+
+### Changed
+- `src/App.jsx` — `generate()` giữ `busy` suốt cả chuỗi nội dung → ảnh (bỏ `setBusy(false)` sớm, chỉ còn `finally`), reset thêm `setImageErr('')` mỗi lần tạo; nút tạo đổi nhãn động theo `autoImage` (`Tạo nội dung`/`Tạo nội dung + Ảnh AI`, khi chạy hiện `Đang tạo...`/`Đang tạo nội dung + ảnh...`); checkbox `Tạo ảnh minh hoạ bằng AI` chuyển lên ngay dưới prompt kèm hint mới; trang `AI Content` chia 2 cột (`.ai-compose` bên trái, `.ai-image-col` bên phải), textarea nội dung cao tối thiểu 300px, footer vẫn ngoài grid và full width.
+- `README.md` — mục `Tạo ảnh minh hoạ bằng AI` mô tả tick checkbox trước khi tạo, nhãn nút mới, 1 click tạo nội dung + 1 ảnh, nút `Tạo ảnh` giữ lại để tạo lại/thử lại, và layout 2 cột.
+- Không đổi backend, IPC, payload `generate_content`/`generate_image`, dependency hay cấu hình.
+
+### Verified
+- `npm run lint` — exit 0.
+- `npm run build` — success (Vite 8.2.2).
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/ai.spec.ts` — 8 passed / 0 failed.
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts` — 54 passed / 0 failed (53 test cũ + 1 test layout mới).
+
+### Unverified
+- Chưa kiểm tra thủ công trên ứng dụng Tauri Desktop với provider ảnh thật; E2E chỉ chạy ở chế độ mock.
+
 ## [Unreleased] - 2026-10-25 — Sửa lỗi đóng gói MSI thiếu icon
 
 ### Fixed
