@@ -133,7 +133,11 @@ FlowPostAI/
 ## Chính sách nhánh
 
 - Phát triển trên nhánh `dev`.
-- Phát hành bằng fast-forward `dev` → `main` (không merge commit, không squash, để lịch sử tuyến tính).
+- Phát hành bằng cách đưa `dev` vào `main`; không squash.
+  - Nếu `main` là tổ tiên của `dev` (`git merge-base --is-ancestor main dev` trả mã 0) → `git merge --ff-only dev` (lịch sử tuyến tính, không merge commit).
+  - Nếu lịch sử đã phân kỳ → dùng merge commit: `git merge --no-ff dev -m "merge: dev -> main — vX.Y.Z release"`; kiểm tra xung đột trước bằng `git merge-tree --write-tree main dev` (trả mã 0 = không xung đột).
+  - Sau khi phát hành, đồng bộ lại `dev`: `git checkout dev && git merge --ff-only main`.
+  - Bản 0.4.0 đã dùng merge commit `28ebd4b` vì `main` có 8 commit không nằm trên `dev`.
 - Build production từ `main`; tag/version phải khớp `package.json`, `src-tauri/Cargo.toml` và `src-tauri/tauri.conf.json`.
 
 ## Khoảng trống đã biết
