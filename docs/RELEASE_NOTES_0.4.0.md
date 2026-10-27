@@ -1,7 +1,7 @@
 # FlowPostAI 0.4.0 — Release Notes
 
 Phát hành: 2026-10-27
-Build từ commit: (điền ở Phase 2)
+Build từ commit: `28ebd4b`
 
 ## Có gì mới
 
@@ -45,9 +45,9 @@ Cài đè lên 0.3.0 được, không cần gỡ bản cũ. Dữ liệu người
 | `npm exec -- vite build` | success (Vite 8.2.2) |
 | `cargo test --lib` | 352 passed / 0 failed |
 | E2E mock (`playwright.e2e-mock.config.ts`) | 60 passed / 0 failed |
-| MSI | (điền ở Phase 2 sau khi build) |
-| NSIS | (điền ở Phase 2 sau khi build) |
-| `flowpost-ai.exe` | (điền ở Phase 2 sau khi build) |
+| MSI | `FlowPost AI_0.4.0_x64_en-US.msi` — 4923392 bytes — SHA256: `00ec309ae2d500cfe408587e51a8f2073c60f45f59a00296f7d4ea6c2f3983da` |
+| NSIS | `FlowPost AI_0.4.0_x64-setup.exe` — 3451928 bytes — SHA256: `ae9860b1e2d46464b84a4af34d22c515afe32e268abd05eef9944a3efc277e37` |
+| `flowpost-ai.exe` | 13819392 bytes — 2026-10-27 16:50 |
 
 ## Rollback
 
