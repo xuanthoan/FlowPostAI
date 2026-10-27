@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, Runtime};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -27,12 +27,20 @@ pub struct ContentItem {
     pub prompt: String,
     pub style: String,
     #[serde(default)]
+    pub topic: Option<String>,
+    #[serde(default)]
     pub custom_style: Option<String>,
     #[serde(default)]
     pub media_ids: Vec<String>,
     pub status: ContentStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+fn normalize_topic(value: Option<String>) -> Option<String> {
+    value
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 pub const TITLE_BODY_SEPARATOR: &str = "\n\n\n";
@@ -48,7 +56,7 @@ pub fn compose_facebook_post(title: &str, body: &str) -> String {
     }
 }
 
-fn content_dir(app: &AppHandle) -> Result<PathBuf, String> {
+fn content_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_data_dir()
@@ -58,11 +66,11 @@ fn content_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-fn content_index_path(app: &AppHandle) -> Result<PathBuf, String> {
+fn content_index_path<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     Ok(content_dir(app)?.join("content-index.json"))
 }
 
-fn read_content_index(app: &AppHandle) -> Result<Vec<ContentItem>, String> {
+fn read_content_index<R: Runtime>(app: &AppHandle<R>) -> Result<Vec<ContentItem>, String> {
     let path = content_index_path(app)?;
     if !path.exists() {
         return Ok(Vec::new());
@@ -71,10 +79,15 @@ fn read_content_index(app: &AppHandle) -> Result<Vec<ContentItem>, String> {
     if contents.trim().is_empty() {
         return Ok(Vec::new());
     }
-    serde_json::from_str(&contents).map_err(|e| e.to_string())
+    let mut items: Vec<ContentItem> = serde_json::from_str(&contents).map_err(|e| e.to_string())?;
+    for it in items.iter_mut() {
+        it.title = crate::ai::repair_mojibake(&it.title);
+        it.body = crate::ai::repair_mojibake(&it.body);
+    }
+    Ok(items)
 }
 
-fn write_content_index(app: &AppHandle, items: &[ContentItem]) -> Result<(), String> {
+fn write_content_index<R: Runtime>(app: &AppHandle<R>, items: &[ContentItem]) -> Result<(), String> {
     let path = content_index_path(app)?;
     let tmp = path.with_extension("json.tmp");
     let json = serde_json::to_string_pretty(items).map_err(|e| e.to_string())?;
@@ -98,6 +111,8 @@ pub struct SaveContentPayload {
     pub body: String,
     pub prompt: String,
     pub style: String,
+    #[serde(default)]
+    pub topic: Option<String>,
     pub custom_style: Option<String>,
     pub media_ids: Option<Vec<String>>,
 }
@@ -115,31 +130,36 @@ pub fn get_content(app: AppHandle, id: String) -> Result<Option<ContentItem>, St
     Ok(items.into_iter().find(|c| c.id == id))
 }
 
-#[tauri::command]
-pub fn save_content(app: AppHandle, payload: SaveContentPayload) -> Result<ContentItem, String> {
+pub fn save_content_item<R: Runtime>(app: &AppHandle<R>, payload: &SaveContentPayload) -> Result<ContentItem, String> {
     if payload.title.trim().is_empty() && payload.body.trim().is_empty() {
         return Err("Tiêu đề hoặc nội dung không được để trống".into());
     }
     if payload.prompt.trim().is_empty() {
         return Err("Prompt không được để trống".into());
     }
-    let mut items = read_content_index(&app)?;
+    let mut items = read_content_index(app)?;
     let now = Utc::now();
     let item = ContentItem {
         id: uuid::Uuid::new_v4().to_string(),
         title: payload.title.trim().to_string(),
         body: payload.body.trim().to_string(),
         prompt: payload.prompt.trim().to_string(),
-        style: payload.style,
-        custom_style: payload.custom_style.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
-        media_ids: payload.media_ids.unwrap_or_default(),
+        style: payload.style.clone(),
+        topic: normalize_topic(payload.topic.clone()),
+        custom_style: payload.custom_style.clone().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+        media_ids: payload.media_ids.clone().unwrap_or_default(),
         status: ContentStatus::Draft,
         created_at: now,
         updated_at: now,
     };
     items.push(item.clone());
-    write_content_index(&app, &items)?;
+    write_content_index(app, &items)?;
     Ok(item)
+}
+
+#[tauri::command]
+pub fn save_content(app: AppHandle, payload: SaveContentPayload) -> Result<ContentItem, String> {
+    save_content_item(&app, &payload)
 }
 
 #[tauri::command]
@@ -168,6 +188,20 @@ pub fn update_content_status(
     Ok(updated)
 }
 
+pub fn update_content_status_generic<R: Runtime>(
+    app: AppHandle<R>,
+    id: String,
+    status: ContentStatus,
+) -> Result<ContentItem, String> {
+    let mut items = read_content_index(&app)?;
+    let pos = items.iter().position(|c| c.id == id).ok_or_else(|| format!("Không tìm thấy {}", id))?;
+    items[pos].status = status;
+    items[pos].updated_at = Utc::now();
+    let updated = items[pos].clone();
+    write_content_index(&app, &items)?;
+    Ok(updated)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateContentPayload {
@@ -176,6 +210,8 @@ pub struct UpdateContentPayload {
     pub body: String,
     pub prompt: String,
     pub style: String,
+    #[serde(default)]
+    pub topic: Option<String>,
     pub custom_style: Option<String>,
     pub media_ids: Option<Vec<String>>,
 }
@@ -195,6 +231,7 @@ pub fn update_content(app: AppHandle, payload: UpdateContentPayload) -> Result<C
     items[pos].body = payload.body.trim().to_string();
     items[pos].prompt = payload.prompt.trim().to_string();
     items[pos].style = payload.style;
+    items[pos].topic = normalize_topic(payload.topic);
     items[pos].custom_style = payload.custom_style.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     items[pos].media_ids = payload.media_ids.unwrap_or_default();
     items[pos].updated_at = Utc::now();
@@ -222,6 +259,7 @@ mod tests {
             body: "body".into(),
             prompt: "prompt".into(),
             style: "Viral".into(),
+            topic: None,
             custom_style: None,
             media_ids: vec![],
             status: ContentStatus::Draft,
@@ -421,5 +459,52 @@ mod tests {
         assert_eq!(compose_facebook_post("TIN", ""), "TIN");
         assert_eq!(compose_facebook_post("", "Thân"), "Thân");
         assert_eq!(compose_facebook_post("", ""), "");
+    }
+
+    #[test]
+    fn test_content_item_deserializes_legacy_json_without_topic() {
+        let json = serde_json::json!({
+            "id": "c1",
+            "title": "T",
+            "body": "B",
+            "prompt": "P",
+            "style": "Viral",
+            "customStyle": null,
+            "mediaIds": [],
+            "status": "draft",
+            "createdAt": "2026-10-19T00:00:00Z",
+            "updatedAt": "2026-10-19T00:00:00Z"
+        });
+        let item: ContentItem = serde_json::from_value(json).unwrap();
+        assert_eq!(item.topic, None);
+    }
+
+    #[test]
+    fn test_content_item_serializes_topic_name() {
+        let mut item = sample_item("id-topic", "Title");
+        item.topic = Some("Chủ đề".into());
+        let json = serde_json::to_string(&item).unwrap();
+        assert!(json.contains("\"topic\":"), "got {}", json);
+        let parsed: ContentItem = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.topic, Some("Chủ đề".into()));
+    }
+
+    #[test]
+    fn test_save_content_payload_accepts_missing_topic() {
+        let payload: SaveContentPayload = serde_json::from_value(serde_json::json!({
+            "title": "T",
+            "body": "B",
+            "prompt": "P",
+            "style": "Viral"
+        }))
+        .unwrap();
+        assert_eq!(payload.topic, None);
+    }
+
+    #[test]
+    fn test_normalize_topic_trims_and_drops_blank() {
+        assert_eq!(normalize_topic(Some("  Chủ đề  ".into())), Some("Chủ đề".into()));
+        assert_eq!(normalize_topic(Some("   ".into())), None);
+        assert_eq!(normalize_topic(None), None);
     }
 }

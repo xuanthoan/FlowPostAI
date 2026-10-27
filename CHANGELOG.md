@@ -2,6 +2,482 @@
 
 Tất cả thay đổi đáng chú ý của FlowPost AI được ghi lại ở đây. Định dạng theo [Keep a Changelog](https://keepachangelog.com/vi/1.0.0/) và dự án tuân theo [Semantic Versioning](https://semver.org/lang/vi/).
 
+## [Unreleased]
+
+## [0.4.0] - 2026-10-27 — Tạo nội dung + Ảnh AI trong một lần bấm
+
+### Added
+- `e2e/ai.spec.ts` — test mới `splits AI Content into compose and image columns and merges the buttons`: kiểm tra 1 `.ai-grid` gồm 1 `.ai-compose` + 1 `.ai-image-col` cùng hàng (`compose.x < imageCol.x`, lệch `y` ≤ 4px), checkbox `Tạo ảnh minh hoạ bằng AI` hiển thị và bật được trước khi tạo, nhãn nút đổi `Tạo nội dung` → `Tạo nội dung + Ảnh AI` khi tick và trả lại khi bỏ tick, một lần bấm gọi `generate_content` 1 lần rồi `generate_image` 1 lần, có `Đã tạo ảnh minh hoạ`/`Đã gắn vào bài viết`/`Gắn media (1)`, nút `Tạo ảnh` thủ công vẫn còn và không được bấm. Mock trong test thêm bộ đếm `window.__GEN_CALLS__`/`window.__IMG_CALLS__`.
+- `src/styles.css` — style `.ai-grid` (2 cột, breakpoint 1250px/980px), `.ai-compose`, `.ai-image-col`; không dùng `position:sticky`.
+- `e2e/library-image.spec.ts` — 5 test mock cho `Kho nội dung`: dòng chưa có ảnh hiện `Tạo ảnh AI` → gọi `generate_image` với `title`/`body` của bài rồi `update_content` với `mediaIds: ['img-1']`; dòng đã có ảnh hiện `Đổi ảnh AI` và modal `Đổi ảnh AI` xuất hiện **trước** khi gọi AI, đóng bằng `Hủy`/`Esc`/overlay mà không tạo ảnh; `Thêm ảnh` giữ thứ tự `['old-1','img-1']`; `Thay ảnh` còn `['img-1']`; lỗi `generate_image` không gọi `update_content` và nút bật lại. Mock ghi `window.__CALLS__`/`window.__GRAPH_CALLS__`; mỗi test assert Graph = 0.
+
+### Changed
+- `src/App.jsx` — `generate()` giữ `busy` suốt cả chuỗi nội dung → ảnh (bỏ `setBusy(false)` sớm, chỉ còn `finally`), reset thêm `setImageErr('')` mỗi lần tạo; nút tạo đổi nhãn động theo `autoImage` (`Tạo nội dung`/`Tạo nội dung + Ảnh AI`, khi chạy hiện `Đang tạo...`/`Đang tạo nội dung + ảnh...`); checkbox `Tạo ảnh minh hoạ bằng AI` chuyển lên ngay dưới prompt kèm hint mới; trang `AI Content` chia 2 cột (`.ai-compose` bên trái, `.ai-image-col` bên phải), textarea nội dung cao tối thiểu 300px, footer vẫn ngoài grid và full width.
+- `README.md` — mục `Tạo ảnh minh hoạ bằng AI` mô tả tick checkbox trước khi tạo, nhãn nút mới, 1 click tạo nội dung + 1 ảnh, nút `Tạo ảnh` giữ lại để tạo lại/thử lại, và layout 2 cột.
+- `src/App.jsx` — cột phải đổi tên `Ảnh minh hoạ AI` (pill `Tuỳ chọn` là `<span>`, không phải button) và thêm hộp `.ai-guide` trả lời 6 câu hỏi của người mới: nguồn ảnh = **Tiêu đề + Nội dung** + phong cách ảnh, không cần viết prompt ảnh riêng, `Cách 1 — Tự động` (checkbox + nút gộp) và `Cách 2 — Thủ công` (nút `Tạo ảnh`), ảnh tự lưu **Thư viện media** và tự gắn vào bài.
+- `src/App.jsx` — nhãn chọn phong cách ảnh đổi thành `Phong cách ảnh` kèm hint “Quyết định màu sắc, ánh sáng… không phải nội dung bài viết”; dòng provider đổi sang câu plain language (`Đang dùng: … · … · {size}. Đổi trong Cài đặt → Model AI.`); nút `Tạo ảnh` dùng derived `hasDraft` thay cho biểu thức `!title.trim() && !body.trim()` (hành vi không đổi) và hint đổi theo trạng thái (chưa có bài / đang bật ảnh tự động / tạo 1 ảnh); result card thêm dòng `Ảnh đã lưu trong Thư viện media.`; hàng `Gắn media` thêm hint về nút `Chọn media`; subtitle trang và hint checkbox viết lại cho người mới.
+- `src/styles.css` — thêm block `.ai-guide` (nền `#f6f5ff`, viền `#e1ddfa`, `line-height: 1.4` để hộp cao ~204px, không vượt giới hạn 210px ở viewport suite).
+- `e2e/ai.spec.ts` — thêm test `AI Content explains image generation to a first-time user`: kiểm tra nội dung hộp `.ai-guide` (nguồn ảnh, không cần prompt, `Cách 1`/`Cách 2`, `Thư viện media`), label `Phong cách ảnh` + hint màu sắc/ánh sáng, hint `Chọn media`/`ảnh/video có sẵn`, pill `Tuỳ chọn` không phải button, nút `Tạo ảnh` disabled khi chưa có bài + hint tương ứng, hộp cao ≤ 210px, và sau khi tạo nội dung thì hint đổi và nút bật lại.
+- `README.md` — mục `Tạo ảnh minh hoạ bằng AI` cập nhật theo copy mới: cột `Ảnh minh hoạ AI`, hộp hướng dẫn trong app (`Cách 1 — Tự động`/`Cách 2 — Thủ công`), `Phong cách ảnh` (màu sắc/ánh sáng, không phải nội dung), “không cần prompt ảnh riêng”, ảnh tự lưu Thư viện media + tự gắn, nút `Tạo ảnh` để tạo lại/retry.
+- Không đổi backend, IPC, payload `generate_content`/`generate_image`, dependency hay cấu hình.
+- `src/App.jsx` — `ContentWarehousePage` thêm nút theo dòng `Tạo ảnh AI`/`Đổi ảnh AI` và modal xác nhận `Đổi ảnh AI` (`Hủy`/`Thêm ảnh`/`Thay ảnh`): tạo ảnh từ tiêu đề + nội dung với style/provider/model/size/saveDir lấy từ `list_image_styles`/`get_image_config`/`list_providers`, rồi `update_content` với `style: it.style` verbatim (không qua `resolveStyleName`), `customStyle`/`topic`/`prompt` giữ nguyên, `mediaIds` = `[mediaId]` khi thay hoặc nối thêm (tối đa 10) khi thêm. Nhãn `Đang tạo ảnh...` chỉ ở dòng đang chạy, mọi nút ảnh bị tắt; thông báo thành công dùng `.desktop-notice`, lỗi dùng `.error-box` sẵn có. Không gọi Graph, không gọi `save_content`.
+- `README.md` — thêm mục `Kho nội dung` trong `Tạo ảnh minh hoạ bằng AI`: nút theo dòng, thêm vs thay, style/provider từ `Cài đặt` → `Model AI`, giới hạn 10 ảnh, ảnh lưu vào `Thư viện media`, và hành vi khi lỗi.
+- Không đổi `src/styles.css`, `src-tauri/**`, dependency hay cấu hình.
+
+### Verified
+- `npm run lint` — exit 0 (0 error, 0 warning).
+- `npm run build` — success (Vite 8.2.2).
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/library-image.spec.ts` — 5 passed / 0 failed.
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts` — 60 passed / 0 failed (55 test cũ + 5 test mới).
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/ai.spec.ts` — 9 passed / 0 failed.
+
+### Unverified
+- Chưa kiểm tra thủ công trên ứng dụng Tauri Desktop với provider ảnh thật; E2E chỉ chạy ở chế độ mock.
+
+## [Unreleased] - 2026-10-25 — Sửa lỗi đóng gói MSI thiếu icon
+
+### Fixed
+- `src-tauri/tauri.conf.json` — thêm `bundle.icon` với bộ icon sẵn có (`icons/32x32.png`, `icons/128x128.png`, `icons/128x128@2x.png`, `icons/icon.icns`, `icons/icon.ico`); trước đó `bundle.icon` rỗng nên WiX không có ứng viên `.ico` và `npm run tauri:build` dừng với `Couldn't find a .ico icon`.
+- `README.md` — ghi chú `bundle.icon`, vị trí MSI/NSIS và lỗi MSI khi thiếu khai báo icon.
+
+### Verified
+- `npm run tauri:build` — exit 0; tạo 2 bundle: `FlowPost AI_0.3.0_x64_en-US.msi` (MSI) và `FlowPost AI_0.3.0_x64-setup.exe` (NSIS).
+- `npm run lint` — exit 0.
+- `npm run build` — success (Vite 8.2.2).
+
+## [Unreleased] - 2026-10-25 — Trang Đăng bài chia 2 cột
+
+### Added
+- `src/App.jsx` — `PublishForm` nhận prop `layout` (`page`/`modal`); trang `Đăng bài` dùng `layout="page"` để render `.publish-grid` 2 cột (`.publish-compose` bên trái, `.publish-media` bên phải). Trang tải `list_media` một lần khi mount qua `mediaLoadedRef`, có nút `Làm mới` (`RefreshCw`, `aria-label="Làm mới thư viện media"`) gọi lại `list_media`; modal giữ nguyên toggle `Chọn ảnh`/`Ẩn` và tải media theo yêu cầu.
+- `e2e/publish-page.spec.ts` — test mới `splits the page into compose and media columns without extra clicks`: kiểm tra 1 `.publish-grid`, 2 cột cùng hàng (`compose.x < media.x`, lệch `y` ≤ 4px), media hiển thị ngay khi mở trang, không có nút `Chọn ảnh`, textarea cao ≥ 320px, `list_media` gọi khi mount, `Làm mới` gọi lại `list_media`, không gọi `list_facebook_pages`.
+- `src/styles.css` — style `.publish-toolbar`/`.publish-grid`/`.publish-compose`/`.publish-textarea`/`.publish-media*`/`.publish-alert` và breakpoint 1250px; `.publish-panel` bỏ giới hạn `max-width:720px`.
+- `README.md` — bullet mô tả trang `Đăng bài` chia 2 cột, media luôn hiển thị kèm `Làm mới`, modal `Cài đặt` vẫn 1 cột.
+
+### Changed
+- `src/App.jsx` — textarea dùng class `.publish-textarea` (bỏ inline style), footer `.publish-footer` nằm ngoài grid và là con trực tiếp của `.publish-form`, nên luôn full width.
+- `e2e/publish-page.spec.ts` — test `caps the selection at 10 images` bỏ bước bấm `Chọn ảnh` (media đã hiển thị sẵn), thêm assert `i1.jpg` hiển thị trước vòng lặp; test modal thêm assert không có `.publish-grid`/`.publish-compose`.
+- Không đổi backend, IPC, payload `publish_content`, dependency hay cấu hình.
+
+### Verified
+- `npm run lint` — exit 0.
+- `npm run build` — success (Vite 8.2.2).
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/publish-page.spec.ts` — 9 passed / 0 failed.
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts` — 53 passed / 0 failed (44 test cũ + 8 test publish cũ + 1 test layout mới).
+
+### Unverified
+- Chưa kiểm tra thủ công trên ứng dụng Tauri Desktop với token Facebook thật (tải thư viện media cục bộ thật, đăng bài thật); E2E chỉ chạy ở chế độ mock.
+
+## [Unreleased] - 2026-10-25 — Trang Đăng bài riêng
+
+### Added
+- `src/App.jsx` — `PublishForm` dùng chung (danh sách Trang, chọn nội dung từ Kho nội dung, textarea + đếm ký tự, picker ảnh tối đa 10, nút đăng), `PublishPage` cho mục sidebar `Đăng bài`, và `dashboardView` tách nguyên văn khỏi nhánh route mặc định.
+- `e2e/publish-page.spec.ts` — 8 test mock: trang riêng không gọi Graph, dashboard `Tổng quan` giữ nguyên, danh sách Trang chỉ tải khi bấm nút, Kho nội dung tải theo yêu cầu và cache, validate nút đăng, payload `publish_content` + thông báo thành công + không tự đóng trang, giới hạn 10 ảnh, và modal trong `Cài đặt` không gọi lại `list_facebook_pages`.
+- `src/styles.css` — style `.publish-page`/`.publish-panel`/`.publish-form`/`.publish-picker`/`.publish-footer`.
+- `README.md` — một bullet mô tả `Đăng bài` là trang riêng, tải danh sách Trang theo yêu cầu, nội dung lấy từ Kho nội dung là dữ liệu cục bộ, tối đa 10 ảnh.
+
+### Changed
+- `src/App.jsx` — route `active === 'Đăng bài'` trả `PublishPage`, `active === 'Tổng quan'` trả `dashboardView`; `PublishModal` chỉ còn là vỏ modal bọc `PublishForm` và nhận `initialPages` từ `SettingsPage`, bỏ `useEffect` gọi `list_facebook_pages` khi mở modal. Nút trong `Cài đặt` → `Kết nối` đổi nhãn `Đăng bài` → `Đăng ngay`; nhãn sidebar giữ nguyên.
+- Không đổi backend, IPC, schema hay tham số `publish_content`; không thêm dependency/icon/router.
+
+### Verified
+- `npm run lint` — exit 0.
+- `npm run build` — success (Vite 8.2.2).
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/publish-page.spec.ts` — 8 passed / 0 failed.
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts` — 52 passed / 0 failed (44 test cũ + 8 test mới).
+
+### Unverified
+- Chưa chạy với Facebook Graph thật (đăng bài thật, tải danh sách Trang thật) vì môi trường không có token Facebook; cần kiểm tra thủ công trên ứng dụng desktop có token.
+
+## [Unreleased] - 2026-10-25 — Báo cáo theo tháng và khoảng ngày tự chọn
+
+### Added
+- `src-tauri/src/facebook.rs` — `ReportRange`/`report_custom_range`/`local_seconds`: resolve `Tháng này` (month-to-date theo giờ địa phương) và khoảng `Tùy chọn` bao gồm cả hai đầu, tối đa 366 ngày, không cho ngày tương lai. `PageReport` thêm `rangeKey`/`rangeLabel`/`fromDate`/`toDate`; thêm lệnh `get_page_report_range`. Báo cáo 7/30 ngày dùng chung core `report_with_range` nhưng giữ nguyên hành vi.
+- `src-tauri/src/lib.rs` — đăng ký `facebook::get_page_report_range`.
+- `src/App.jsx` — `ReportPage` thêm lựa chọn `Tháng này`/`Tùy chọn`, hai ô `Từ ngày`/`Đến ngày`, validate ngày cục bộ trước khi gọi Graph, stale/disable xuất theo đúng bộ lọc đã tải.
+- `src/reportCsv.js` — summary dùng `rangeLabel`; tên CSV dạng `...-thang-nay-...` và `...-tu-{from}-den-{to}-...`.
+- `src/styles.css` — style cho `input[type=date]` trong `.report-controls`.
+- `e2e/report.spec.ts` — mock `get_page_report_range` và 2 test cho tháng/tùy chọn.
+- `README.md` — hướng dẫn `Tháng này`, `Tùy chọn`, giới hạn 366 ngày/không ngày tương lai, tên CSV và quy tắc không gọi Graph khi đổi bộ lọc.
+
+### Changed
+- Báo cáo 7/30 ngày vẫn dùng lệnh `get_page_report`, kết quả và test cũ; dashboard quick report (`loadGraph`) và `e2e/ai.spec.ts` không đổi.
+
+### Verified
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib` — 352 passed / 0 failed (346 test cũ + 6 test range mới).
+- `npm exec -- eslint .` — exit 0.
+- `npm run build` — success (Vite 8.2.2).
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/report.spec.ts` — 6 passed / 0 failed.
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts` — 44 passed / 0 failed.
+
+### Unverified
+- Chưa chạy với Facebook Graph thật hoặc hộp thoại in/Save as PDF thật vì môi trường không có token Facebook thật; cần kiểm tra thủ công trên ứng dụng desktop có token.
+
+## [Unreleased] - 2026-10-25 — Trang Báo cáo đầy đủ + xuất CSV/PDF
+
+### Added
+- `src-tauri/src/facebook.rs` — `PageReport`/`ReportPost`, `report_window` (chỉ 7/30 ngày), `get_page_report`, phân trang bằng `paging.cursors.after` (100 bài/trang, tối đa 20 trang = 2.000 bài), tổng cảm xúc/bình luận/chia sẻ từ summary và cờ `partial`/`truncated`. Request dùng Bearer, không đưa token vào query.
+- `src-tauri/src/lib.rs` — lệnh `save_report_csv` với hộp thoại lưu native, sanitizer tên tệp Windows, giới hạn 32 MB, ghi UTF-8 nguyên văn (BOM do frontend thêm).
+- `src/reportCsv.js` — builder CSV thuần: khối summary tiếng Việt, bảng bài viết, RFC4180 quoting và trung hòa formula injection; tên tệp `bao-cao-{slug}-{days}ngay-{YYYY-MM-DD}.csv`.
+- `src/App.jsx` — `ReportPage` trong sidebar `Báo cáo`: chọn Trang, 7/30 ngày, stat cards, bảng bài viết, cảnh báo stale/truncated/partial, `Xuất CSV` và `Xuất PDF` (window.print → Save as PDF).
+- `src/styles.css` — style trang báo cáo và `@media print` khổ A4 landscape.
+- `e2e/report.spec.ts` — E2E mock cho on-demand, chọn Trang/ngày, CSV và PDF.
+- `README.md` — hướng dẫn chọn Trang/7/30 ngày, công thức tương tác, giới hạn 2.000 bài, CSV/PDF và quy tắc không gọi Graph khi mount/đổi bộ lọc/xuất.
+
+### Changed
+- Dashboard quick report (`loadGraph`, nút `Tải báo cáo`, timestamp/snapshot) giữ nguyên hành vi và vẫn là 5 Graph call trong `e2e/ai.spec.ts`.
+- Báo cáo mới chỉ gọi Graph khi bấm `Tải báo cáo` hoặc `Tải lại danh sách Trang`; đổi Trang/khoảng ngày chỉ đánh dấu stale và tắt xuất cho đến khi tải lại.
+
+### Verified
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib` — 346 passed / 0 failed (331 test cũ + 15 test báo cáo/CSV mới).
+- `npm exec -- eslint .` — exit 0.
+- `npm run build` — success (Vite 8.2.2).
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/report.spec.ts` — 4 passed / 0 failed.
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts` — 42 passed / 0 failed, gồm `e2e/ai.spec.ts` 7 passed (quick report vẫn đúng 5 Graph call) và `e2e/report.spec.ts` 4 passed.
+
+### Unverified
+- Chưa chạy smoke test với Facebook Graph thật và hộp thoại in/Save as PDF thật vì môi trường không có token Facebook thật; phần này cần kiểm tra thủ công trên ứng dụng desktop có token.
+
+### Notes
+- Tổng tương tác của trang báo cáo = cảm xúc + bình luận + chia sẻ trên các bài đã tải, khác với insights impressions/engaged/clicks ở Dashboard.
+- PDF dùng hộp thoại in của hệ thống/WebView2; không thêm dependency tạo PDF.
+
+## [Unreleased] - 2026-10-23 — Báo cáo Facebook tải theo yêu cầu
+
+### Changed
+- `src/App.jsx` — bỏ tự gọi Facebook Graph khi mở Dashboard hoặc chuyển tab; chỉ nút `Tải báo cáo` trong khung "Bài viết gần đây" mới tải Trang + 5 bài gần nhất + insights 6 metric cho 3 bài đầu.
+- `src/App.jsx` — thêm trạng thái `Chưa tải báo cáo` / `Cập nhật lúc HH:mm`, `error-box` cho lỗi token/rate limit/không có Trang/không tải được insights; giữ snapshot báo cáo trong bộ nhớ để chuyển tab không gọi lại Graph.
+- `README.md` — cập nhật hành vi báo cáo on-demand.
+- `e2e/ai.spec.ts` — test hồi quy chứng minh không có Graph call khi mount/chuyển tab, chỉ có đúng 5 call sau khi bấm nút.
+
+### Verified
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib` — 331 passed / 0 failed.
+- `npm exec -- eslint .` — exit 0.
+- `npm run build` — success.
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/ai.spec.ts e2e/providers.spec.ts` — 15 passed / 0 failed.
+
+### Notes
+- Báo cáo chỉ lấy Trang đầu tiên (`pages[0]`), tối đa 5 bài gần nhất và insights 3 bài đầu; chưa có chọn Trang/khoảng ngày/xuất CSV-PDF.
+
+## [Unreleased] - 2026-10-23 — Cài đặt: 3 tab và chọn model AI
+
+### Changed
+- `src/App.jsx` — Cài đặt tách 3 tab: `Kết nối` (Facebook token), `Cài đặt Provider` (CRUD/API key/models), `Model AI` (chọn provider/model viết content và provider/model tạo ảnh, kích thước, thư mục lưu). Hai mục content/image độc lập provider.
+- `src/App.jsx` — bỏ 2 ô `Model mặc định để viết` và `Model mặc định để tạo ảnh` khỏi form provider. Model viết content lưu vào `Provider.defaultModel` qua tab `Model AI`; model ảnh lưu trong `image-config.json`.
+- `README.md` — cập nhật hướng dẫn chọn model tạo ảnh.
+- `playwright.e2e-mock.config.ts` — config chạy mock E2E không cần đặt biến môi trường thủ công.
+
+### Verified
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib` — 331 passed / 0 failed.
+- `npm exec -- eslint .` — exit 0.
+- `npm run build` — success.
+- `npm exec -- playwright test --config=playwright.e2e-mock.config.ts e2e/ai.spec.ts e2e/providers.spec.ts` — 14 passed / 0 failed.
+
+### Notes
+- `defaultImageModel` cũ vẫn được backend dùng làm fallback khi `image-config.model` trống; không còn chỉnh trong form provider.
+
+## [Unreleased] - 2026-10-23 — Sửa lỗi mất API key/token lưu im lặng
+
+### Fixed
+- `src-tauri/src/security.rs` — chỉ xoá bản fallback plaintext sau khi ghi keyring và **đọc lại được** giá trị vừa ghi bằng một `Entry` mới; nếu không đọc lại được thì ghi fallback và giữ nguyên. Áp dụng cho cả nhánh migrate.
+- `src-tauri/src/security.rs` — thêm test hồi quy set→get qua `Entry` mới và migrate fallback đọc hai lần.
+
+### Notes
+- Nguyên nhân: `keyring` không có backend nền tảng nào được bật, nên trên Windows mọi lần ghi chỉ vào mock store trong RAM rồi bị coi là thành công và xoá mất bản fallback.
+- Bản build này **chưa bật** backend Windows Credential Manager (lỗi loader của `windows-sys 0.60` trên môi trường build hiện tại); secret dùng fallback plaintext cho tới khi có task riêng.
+- API key/token đã "lưu" bằng bản lỗi trước đây không thể khôi phục; cần nhập lại.
+
+## [Unreleased] - 2026-10-22 — AI Content: tạo ảnh minh hoạ bằng AI
+
+### Added
+- `src-tauri/src/image_styles.rs` — thực thể style ảnh riêng (`image_styles.json`) với 3 style mặc định `Điện ảnh`, `Tối giản`, `Minh hoạ phẳng`; 6 lệnh list/create/update/duplicate/delete/reset; chặn xoá và chặn khôi phục style mặc định.
+- `src-tauri/src/image_gen.rs` — `generate_image` gọi `POST {base}/images/generations` theo chuẩn OpenAI-compatible (`n=1`, `response_format=b64_json`, timeout 180s); nếu provider trả `url`, backend tự tải ảnh về và không gửi kèm API key; nhận diện PNG/JPEG/WEBP/GIF và từ chối ảnh quá 10MB; `image-config.json` lưu provider/model/thư mục/style/kích thước; `pick_image_folder` chọn thư mục lưu.
+- `src-tauri/src/providers.rs` — provider có thêm `defaultImageModel` (serde mặc định nên `providers.json` cũ vẫn đọc được); `resolve_image_model` theo thứ tự: model truyền kèm → `defaultImageModel` → `defaultModel` → model đầu tiên trong danh sách → `DEFAULT_MODEL`.
+- `src/App.jsx` — `AI Content` có checkbox `Tạo ảnh minh hoạ bằng AI` (mặc định tắt), khối chọn Style ảnh/Provider/Model/Kích thước/Thư mục lưu, nút `Tạo ảnh` và `Thử tạo lại ảnh`; ảnh tạo xong được gắn vào nội dung để đăng kèm. `Providers` có ô `Model mặc định để tạo ảnh`.
+
+### Changed
+- `src-tauri/src/lib.rs` — thêm `register_bytes_at` / `register_media_bytes` để ghi ảnh AI vào thư viện media kèm `media-index.json`, có rollback khi ghi index lỗi.
+- `src/App.jsx` — ảnh AI luôn được lưu trong thư viện media; nếu người dùng chọn thư mục, ghi thêm một bản sao (lỗi copy chỉ là cảnh báo). Lỗi tạo ảnh không làm mất nội dung đã tạo.
+
+### Verified
+- `cargo test --lib` — 327 passed / 0 failed.
+- `npm exec -- eslint .` — exit 0 (QA chạy lại độc lập).
+- `npm run build` — exit 0.
+- `E2E_MOCK=true npm exec -- playwright test e2e/ai.spec.ts e2e/providers.spec.ts` — 13 passed / 0 failed (gồm 2 test mới: tạo ảnh khi tick checkbox, và giữ nguyên nội dung khi tạo ảnh lỗi).
+
+### Notes
+- Chưa kiểm thử với provider tạo ảnh thật; E2E dùng mock.
+
+## [Unreleased] - 2026-10-20 — Kho nội dung: preview ảnh và video đính kèm trong list
+
+### Changed
+- `src/App.jsx` — `ContentWarehousePage` tải `list_media` trong `refresh` và dựng bản đồ media theo id; mỗi dòng list hiển thị tối đa 4 thumbnail ảnh/video đính kèm dưới dòng meta, kèm `+N` khi có nhiều hơn 4.
+- `src/App.jsx` — bỏ qua media đã bị xóa (id stale) và cập nhật số lượng media theo số media còn tồn tại; video hiển thị badge `▶` và không tự phát.
+
+### Verified
+- `npm exec -- eslint .` — exit 0 (QA chạy lại độc lập).
+- `npm run build` — exit 0.
+- `git diff --check` — exit 0.
+
+## [Unreleased] - 2026-10-20 — AI: chọn model viết rõ ràng, lỗi model tạo ảnh có gợi ý
+
+### Changed
+- `src-tauri/src/providers.rs` — provider có thêm `defaultModel` (serde mặc định nên `providers.json` cũ vẫn đọc được), thêm hàm `resolve_model` với thứ tự: model truyền kèm, `defaultModel`, model đầu tiên trong danh sách, `DEFAULT_MODEL`.
+- `src-tauri/src/ai.rs` — `generate_content` nhận `model` tuỳ chọn; khi nhà cung cấp trả 400 nói model là model tạo ảnh, thêm gợi ý chọn model văn bản kèm tên model đã dùng.
+- `src/App.jsx` — Providers thêm ô `Model mặc định để viết`; AI Content thêm ô `Model` để ghi đè cho từng lần tạo.
+
+### Added
+- `e2e/ai.spec.ts` — kiểm thử model chỉ được gửi khi được chọn và placeholder hiển thị model mặc định.
+- Kiểm thử Rust: 14 test cho `resolve_model`, serde `defaultModel`, body request và gợi ý lỗi.
+
+### Verified
+- `cargo test --lib` — 224 passed / 0 failed.
+- `npm exec -- eslint .` — exit 0 (QA chạy lại độc lập).
+- `npm run build` — exit 0.
+- Playwright `e2e/ai.spec.ts` — 3 passed (QA chạy lại độc lập).
+
+## [Unreleased] - 2026-10-20 — Kho nội dung: gợi ý chủ đề và style dùng theme sáng
+
+### Changed
+- `src/App.jsx` — thay hai gợi ý `<datalist>` của ô Chủ đề và Style bằng component `SuggestInput` tự viết: nền trắng, viền và bóng theo palette sáng của app, rộng đúng bằng ô nhập nên không còn hộp đen native tràn ra ngoài.
+- `src/App.jsx` — chọn gợi ý bằng chuột hoặc bàn phím (ArrowUp, ArrowDown, Enter, Escape, Tab), lọc gợi ý theo chuỗi con không phân biệt hoa thường, giữ nguyên placeholder, aria-label và logic lọc AND.
+
+### Verified
+- `npm exec -- eslint .` — exit 0 (QA chạy lại độc lập).
+- `npm run build` — exit 0 (QA chạy lại độc lập).
+
+## [Unreleased] - 2026-10-20 — Kho nội dung: ba ô tìm kiếm theo tiêu đề, chủ đề và style
+
+### Changed
+- `src/App.jsx` — thay ô tìm kiếm duy nhất bằng ba ô tìm kiếm nằm cùng hàng: tiêu đề/nội dung, chủ đề và style; mỗi ô khớp chuỗi con, không phân biệt hoa thường, bỏ khoảng trắng hai đầu và kết hợp AND với nhau cùng bộ lọc trạng thái.
+- `src/App.jsx` — bỏ hai dropdown lọc của entry trước, thay bằng gợi ý `datalist` lấy từ nội dung đang tải để không phải cuộn một danh sách dài.
+- `src/App.jsx` — ô tìm kiếm thứ nhất chỉ còn tìm trong tiêu đề, nội dung và prompt; tìm theo chủ đề dùng ô thứ hai, tìm theo style dùng ô thứ ba.
+
+### Verified
+- `npm run lint` — exit 0 trong phiên implement; QA chạy lại độc lập bằng `npm exec -- eslint .` — exit 0.
+- `npm run build` — exit 0.
+
+## [Unreleased] - 2026-10-20 — Kho nội dung: lọc theo chủ đề và style
+
+### Added
+- `src/App.jsx` — thêm hai bộ lọc một lựa chọn ở Kho nội dung: lọc theo chủ đề (kèm mục `Chưa có chủ đề`) và lọc theo style (dùng tên style đã quy đổi).
+- `src/App.jsx` — danh sách lựa chọn lấy từ nội dung đang tải, gộp trùng không phân biệt hoa thường và sắp xếp theo tiếng Việt; bộ lọc kết hợp AND với trạng thái và từ khóa tìm kiếm.
+- `src/App.jsx` — giữ nguyên lựa chọn sau khi làm mới; nếu giá trị đã chọn không còn trong dữ liệu thì vẫn hiển thị thành một lựa chọn riêng thay vì để trống.
+
+### Verified
+- `npm run lint` — exit 0 trong phiên implement; QA chạy lại độc lập bằng `npm exec -- eslint .` — exit 0.
+- `npm run build` — exit 0.
+
+## [Unreleased] - 2026-10-20 — Kho nội dung: giới hạn tiêu đề dài trong list
+
+### Changed
+- `src/App.jsx` — tiêu đề item trong list Kho nội dung được clamp tối đa 2 dòng, chống tràn ngang với từ dài, và có tooltip chứa tiêu đề đầy đủ.
+- `src/App.jsx` — item không có tiêu đề hiển thị `Chưa có tiêu đề` thay vì một dòng trống.
+
+### Verified
+- `npm run build` — exit 0.
+- `npm run lint` — exit 0 trong phiên implement (QA reviewer bị sandbox chặn lệnh này).
+
+## [Unreleased] - 2026-10-20 — Kho nội dung: preview ngắn và bố cục dạng list
+
+### Changed
+- `src/App.jsx` — danh sách Kho nội dung chuyển từ lưới 2 cột card sang list một dòng mỗi item, có divider giữa các dòng và nút thao tác bên phải.
+- `src/App.jsx` — thêm `previewText` và `CONTENT_PREVIEW_LIMITS`: body 200, topic 80, prompt 120 code point; gộp khoảng trắng và chỉ thêm `…` khi bị cắt; meta line cắt một dòng, ngày và số media luôn hiển thị.
+
+### Verified
+- `npm run build` — exit 0.
+- `npm run lint` — exit 0 trong phiên implement (QA reviewer bị sandbox chặn lệnh này).
+
+## [Unreleased] - 2026-10-20 — Sửa nhãn style hiển thị id thay vì tên
+
+### Fixed
+- `src/App.jsx` — pill style ở Kho nội dung, phụ đề Lịch sắp tới và cột trang ở Tổng quan hiển thị tên style; giá trị id được quy đổi sang tên, giá trị không khớp giữ nguyên.
+- `src/App.jsx` — lịch AI lưu tên style thay vì id (mặc định, dropdown, khi mở sửa) và khi sửa bài trong Kho nội dung sẽ ghi lại tên style.
+- `src-tauri/src/styles.rs` — thêm hàm thuần `resolve_style_name` và `read_styles`; `list_styles` giữ nguyên chữ ký lệnh.
+- `src-tauri/src/auto_schedule.rs` — chuẩn hoá id sang tên khi tạo/cập nhật lịch và trong `run_one` trước khi gọi AI và lưu content; đọc style lỗi thì giữ nguyên giá trị gốc.
+
+### Verified
+- `cargo test --lib` — 210 passed, 0 failed (+9 test mới).
+- `cargo check` — exit 0, 7 warning có sẵn từ trước.
+- `npm run build` — exit 0.
+- `npm run lint` — exit 0 trong phiên implement (QA reviewer bị sandbox chặn lệnh này).
+
+## [Unreleased] - 2026-10-20 — Sắp xếp lại sidebar, đổi tên Lịch AI content và Lịch đăng bài
+
+### Changed
+- `src/App.jsx` — sắp xếp lại 8 mục sidebar theo thứ tự: Tổng quan, Kho nội dung, AI Content, Lịch AI content, Lịch đăng bài, Thư viện media, Đăng bài, Báo cáo.
+- `src/App.jsx` — đổi tên mục "Lịch AI tự động" thành "Lịch AI content" ở nav, routing key và tiêu đề trang `LỊCH AI CONTENT`.
+- `src/App.jsx` — đổi tên mục "Lịch nội dung" thành "Lịch đăng bài" ở nav, routing key, nút "Xem lịch đăng bài", callback `DashboardSchedulePanel.onViewAll` và tiêu đề trang `LỊCH ĐĂNG BÀI`.
+
+### Verified
+- `npm run build` — exit 0.
+- `npm run lint` — exit 0 trong phiên implement (QA reviewer bị sandbox chặn lệnh này).
+
+## [Unreleased] - 2026-10-19 — Guard style/publish + counters + panic fix
+### Added
+- `src/App.jsx` — 3 bộ đếm ký tự mới (Nội dung AI, Nội dung style, Nội dung bài đăng, Sửa nội dung kho) dùng `charCount` (code points).
+- `src-tauri/src/ai.rs` — guard `MAX_STYLE_CONTENT_CHARS = 50000` cho style content (code points), trả lỗi tiếng Việt.
+- `src-tauri/src/facebook.rs` — guard `GRAPH_MAX_MESSAGE_CHARS = 63206` cho message publish (code points).
+### Changed
+- `src/App.jsx` — `charCount` (code points) thay `.length` ở các counter; cảnh báo style dài > 12000 ký tự.
+- `src-tauri/src/facebook.rs` — `preview_prefix` thay slice byte để tránh panic multi-byte.
+### Fixed
+- `src-tauri/src/facebook.rs` — panic khi slice byte không đúng ranh giới UTF-8 trong thông báo lỗi.
+### Verified
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` — test result: ok. 196 passed; 0 failed.
+- `cargo build --manifest-path src-tauri/Cargo.toml` — exit 0.
+- `npm run build` — exit 0.
+
+## [Unreleased] - 2026-10-19 — Bỏ giới hạn 4000 ký tự
+### Changed
+- `src/App.jsx` — bỏ `maxLength={4000}` ở ô Prompt, Nội dung style và Prompt mẫu; bộ đếm chỉ hiển thị số ký tự đã nhập (dạng `1234 ký tự`), không còn trần `/4000`.
+- `src-tauri/src/ai.rs` — `DEFAULT_MAX_TOKENS` 2048 → 4096 (giữ `AI_MAX_TOKENS_CAP = 8192`); lần thử lại phát 8192 token.
+### Removed
+- `src-tauri/src/topics.rs` — bỏ `MAX_TEMPLATE_CHARS` và lỗi `Prompt mẫu tối đa 4000 ký tự`.
+- `src-tauri/src/styles.rs` — bỏ trần 4000 ký tự của nội dung style và lỗi `Nội dung style tối đa 4000 ký tự`.
+### Verified
+- `npm run build` — `✓ built in 5.42s`, exit 0.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib` — `test result: ok. 187 passed; 0 failed`.
+
+## [Unreleased] - 2026-10-19 — Tắt kiểm tra chính tả ở mọi ô nội dung
+### Changed
+- `index.html` — thêm `spellcheck="false"` trên thẻ `<html>` để mọi ô nhập kế thừa.
+- `src/App.jsx` — thêm `spellCheck={false}` cho 19 ô nhập văn bản (`input` text + `textarea`); không đổi hành vi, placeholder, `maxLength`, `disabled` hay style; không đụng `type="password"` và `type="datetime-local"`.
+### Verified
+- `npm run build` — `✓ built in 13.45s`, exit 0.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib` — `test result: ok. 187 passed; 0 failed`.
+
+## [Unreleased] - 2026-10-19 — Chủ đề + random placeholder (frontend)
+### Added
+- `src/App.jsx` — mục `Chủ đề` phía trên ô Prompt: select `Tự do`/chủ đề + `Sửa`/`Thêm chủ đề` + preview 1 dòng; modal chủ đề (tên ≤60, prompt mẫu ≤4000, editor danh sách "mỗi dòng 1 cụm từ"); dòng `Đã dùng:` hiển thị biến thể do Rust mở rộng.
+- `e2e/topics.spec.ts` — 6 test cho `list_topics`/`create_topic`/`update_topic`/`delete_topic` qua mock.
+### Changed
+- `src/App.jsx` — ô Prompt 500 → 4000 ký tự; `generate_content` gửi thêm `topicLists`; `save_content` gửi thêm `topic` (tên chủ đề hoặc null); Kho nội dung tìm kiếm/hiển thị chủ đề và `update_content` truyền `topic` (tránh xoá chủ đề khi sửa bài).
+### Verified
+- `npm run lint` → `eslint .` chạy sạch, exit 0.
+- `npm run build` → `✓ built in 10.08s`, exit 0.
+- `E2E_MOCK=true npx playwright test --list` → `Total: 31 tests in 6 files`.
+
+## [Unreleased] - 2026-10-19 — Chủ đề + random placeholder (backend)
+### Added
+- `src-tauri/src/topics.rs` — store `topics.json` (app_data_dir, atomic tmp+rename) với 4 command `list_topics`/`create_topic`/`update_topic`/`delete_topic` + validate (tên ≤60, template ≤4000, ≤10 danh sách, ≤50 cụm từ/danh sách, cụm từ ≤100 ký tự) + 24 unit test.
+- `src-tauri/src/ai.rs` — `topicLists` (optional) trong `GeneratePayload`; engine `expand_prompt` cú pháp `[tên danh sách]` (SplitMix64, seed tiêm được khi test), cap 12000 ký tự; field `promptUsed` trong `GenerateResult` + 16 test.
+- `src-tauri/src/content.rs` — `ContentItem.topic: Option<String>` (`serde(default)`, không cần migration) + 2 payload + `normalize_topic` + 4 test.
+- `src-tauri/src/lib.rs` — đăng ký 4 command `topics::*`.
+### Changed
+- `generate_content` gọi LLM bằng prompt đã mở rộng; `GenerateResult.prompt` vẫn là template gốc (không đổi semantics).
+### Verified
+- `cargo check --manifest-path src-tauri/Cargo.toml` → `Finished` 0 lỗi.
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` → `test result: ok. 187 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out` (baseline 143 + 44).
+
+## [Unreleased] - 2026-10-19 — Thu gọn khu vực cài đặt style trong trang Tạo nội dung AI
+### Changed
+- `src/App.jsx` — box cấu hình style luôn-hiện được thay bằng hàng gọn: dropdown Style + nút `Sửa` (icon `Pencil`) + nút `Thêm style` (icon `Plus`) + badge `Mặc định`/`Tùy chỉnh` + đúng 1 dòng preview nội dung (ellipsis); editor chuyển thành modal popup chứa `Tên style`/`Nội dung style` và các nút `Lưu thay đổi`/`Nhân bản`/`Khôi phục mặc định`/`Xóa`/`Đóng`; đóng modal không lưu (không gọi invoke) và re-sync draft. Không đổi payload gửi backend (`styleContent`, `style`/`customStyle: null`), không đổi Rust, E2E vẫn 25 test / 5 file.
+### Fixed
+- `src/App.jsx` — xoá style đang chọn không còn ghi đè `styleDraft` bằng style đã xoá (tránh preview/payload lệch); modal nhận focus khi mở để ESC đóng được ngay.
+
+## [Unreleased] - 2026-10-19 — Xác minh & hiệu chỉnh tài liệu bảo mật API key
+### Fixed
+- `SECURITY.md` — sửa khẳng định sai ở mục "Lịch sử key": câu "Working tree cũng sạch (`.env` chưa tồn tại)" không đúng, vì `e2e/.env` tồn tại trên đĩa (untracked, bị `e2e/.gitignore` bỏ qua).
+### Changed
+- `SECURITY.md` — mục "Lịch sử key" phản ánh đúng trạng thái đã kiểm chứng: `git filter-repo` đã chạy, commit gốc chứa key (`8bd6850`) và các hash trước rewrite không còn tồn tại cục bộ, bản viết lại (`c0adfcb`) đã publish lên `origin/dev`; `.env` không được track.
+### Verified
+- `git log --all --name-only -S"sk-"` → chỉ khớp: placeholder `sk-REPLACE_WITH_YOUR_KEY` (`SECURITY.md`, `CHANGELOG.md`, `e2e/README.md`, `e2e/.env.example`, `e2e/helpers/provider.ts`) và các chuỗi rút gọn dạng `sk-...` trong test (`e2e/providers.spec.ts`); không có `sk-*` key thật trong ref reachable.
+- `git rev-parse 8bd6850` → `fatal: ambiguous argument '8bd6850': unknown revision or path not in the working tree` (commit gốc không còn tồn tại cục bộ).
+- `git log --oneline origin/dev..c0adfcb` → rỗng (bản rewrite đã lên `origin/dev`).
+- `git ls-files --error-unmatch e2e/.env` → `error: pathspec 'e2e/.env' did not match any file(s) known to git`; `git log --all --name-only -- e2e/.env` → rỗng.
+- `git status --porcelain --ignored -- e2e/` → `!! e2e/.env` (được ignore, không tracked).
+### Notes
+- Entry lịch sử `[370d1bb]` (2026-09-05) giữ nguyên; câu "cần filter-repo riêng" trong đó đã lỗi thời và được entry này supersede.
+- CHƯA xác minh: trạng thái key trong `e2e/.env` trên đĩa (không đọc giá trị); việc GitHub còn phục vụ blob cũ theo SHA hay không (cần network/owner); số object unreachable (`git fsck` bị chặn trong sandbox).
+- Còn một **đoạn tiền tố key đã bị cắt** (dạng `sk-xxxx…`, không đủ để sử dụng) trong blob lịch sử của `e2e/providers.spec.ts` ở commit `c0adfcb` (commit `462e2af` đã gỡ nó; `git log -S` vẫn liệt kê cả hai commit vì số lần xuất hiện thay đổi); đây không phải credential dùng được, nhưng KHÔNG thể xoá nếu không viết lại lịch sử lần nữa (cần quyết định riêng của chủ dự án).
+
+## [Unreleased] - 2026-10-19 — Style có nội dung chỉnh sửa được + lưu style tùy chỉnh
+### Added
+- `src-tauri/src/styles.rs` — store `styles.json` trong app_data_dir: CRUD (thêm/sửa/nhân bản/xóa/khôi phục mặc định), seed 3 built-in cố định `viral`/`motivational`/`story`, tự chữa lành (self-heal: dedupe id, seed lại built-in bị xóa, đặt lại entry mặc định bị rỗng), 21 unit test (gồm test chống mojibake).
+- `src-tauri/src/lib.rs` — đăng ký 6 command `styles::list_styles`, `styles::create_style`, `styles::update_style`, `styles::duplicate_style`, `styles::delete_style`, `styles::reset_style`.
+- `e2e/styles.spec.ts` — 6 test E2E (mock stateful) cho `list_styles`/`create_style`/`update_style`/`duplicate_style`/`delete_style`/`reset_style`.
+### Changed
+- `src-tauri/src/ai.rs` — `GeneratePayload.styleContent`; `build_system_message` nhận thêm khối hướng dẫn style (áp dụng giọng văn/cấu trúc, quy tắc định dạng luôn thắng khi xung đột), giữ nguyên hành vi byte-for-byte khi không có nội dung; thêm 2 test.
+- `src/App.jsx` — chọn style hiển thị đầy đủ nội dung cấu hình để xem/sửa; thêm/nhân bản/xóa/khôi phục mặc định; bỏ tùy chọn `Custom` + ô `customStyle` ở trang AI; `generate_content` gửi `styleContent`; `save_content` lưu TÊN style và `customStyle: null`.
+- `e2e/ai.spec.ts` — mock `generate_content` echo thêm `styleContent`.
+### Fixed
+- `src-tauri/src/styles.rs` — sửa lỗi toàn bộ chuỗi tiếng Việt bị mojibake (double-encoded) trong bản đầu tiên; thêm test `test_vietnamese_literals_are_not_mojibaked` (chỉ dùng escape ASCII nên không thể bị hỏng theo) để chặn tái phát.
+### Verified
+- `cargo check --manifest-path src-tauri/Cargo.toml` → `Finished` 0 lỗi (7 warning dead-code có sẵn, không phát sinh mới).
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` → `test result: ok. 143 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s` (120 cũ + 21 styles + 2 ai).
+- `npm run lint` → exit 0 (không có output).
+- `npm run build` → `✓ 2395 modules transformed` / `✓ built in 7.00s`.
+- `npx playwright test --list` → `Total: 25 tests in 5 files` (19 cũ + 6 styles).
+### Notes
+- Nội dung style do người dùng sửa được lưu vào `styles.json` trong app_data_dir (không dùng localStorage).
+- `content.rs` và dữ liệu nội dung đã lưu giữ nguyên (không migration); `ContentItem.style`/`custom_style` vẫn lưu TÊN style.
+- Giao diện thật cần `npm run tauri:dev` để kiểm chứng.
+
+## [Unreleased] - 2026-10-19 — Bỏ tính năng chọn độ dài bài viết (Ngắn/Vừa/Dài)
+### Changed
+- `src-tauri/src/ai.rs` — bỏ `length` khỏi `GeneratePayload`, xoá `max_tokens_for_length`, cố định `DEFAULT_MAX_TOKENS = 2048` (giữ nguyên hành vi cũ vì trước đây nhánh mặc định cũng là 2048); cập nhật `EMPTY_BODY_ERROR` (bỏ câu "chọn độ dài khác").
+- `src/App.jsx` — bỏ dropdown "Độ dài" ở trang AI Content; grid 3 cột → 2 cột; payload `generate_content` không còn gửi `length`.
+- `e2e/ai.spec.ts` — bỏ `length` khỏi payload test và xoá test `generate_content respects length Ngắn/Dài` (đã lỗi thời).
+### Verified
+- `cargo check --manifest-path src-tauri/Cargo.toml` → `Finished` 0 lỗi (7 warning dead-code có sẵn, không phát sinh mới).
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` → `test result: ok. 120 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.56s` (119 cũ − 1 xoá + 2 mới).
+- `npm run lint` → exit 0 (không có output).
+- `npm run build` → `✓ 2395 modules transformed` / `✓ built in 11.39s`.
+- `npx playwright test --list` → `Total: 19 tests in 4 files` (giảm 1 test đã xoá).
+### Notes
+- Độ dài bài viết giờ do người dùng mô tả trong prompt; `customStyle` và nhánh `Custom` vẫn giữ nguyên (sẽ thay đổi ở phần Style sau).
+
+## [Unreleased] - 2026-10-18 — Fix AI trả về tiêu đề cụt + thân bài rỗng (Gemini thinking budget)
+### Fixed
+- `src-tauri/src/ai.rs` — Gemini 2.5/3.x là thinking model; trên endpoint OpenAI-compat, `max_tokens` bị tính chung cho cả phần suy luận lẫn output hiển thị nên 250/500/800 token bị "đốt" hết vào suy luận → model cắt còn đúng một dòng tiêu đề dở (`finish_reason:"length"`) và thân bài rỗng, nhưng app vẫn báo "Đã tạo nội dung". Nay app hạ `reasoning_effort` cho host Gemini, phát hiện `finish_reason == "length"`, thử lại 1 lần với ngân sách token gấp đôi, và báo lỗi tiếng Việt rõ ràng thay vì "thành công giả" khi thân bài rỗng
+### Changed
+- `src-tauri/src/ai.rs` — `max_tokens` theo độ dài: 250/500/800 → 1024/2048/4096 (Ngắn/Vừa/Dài); thêm trần `AI_MAX_TOKENS_CAP = 8192`
+- `src-tauri/src/ai.rs` — gửi `reasoning_effort: "low"` CHỈ tới host Google Gemini (`generativelanguage.googleapis.com`); provider khác không gửi field này
+- `src-tauri/src/ai.rs` — `parse_ai_response` nhận thêm separator 2 dòng trống (`\n\n\n`) đúng như system prompt yêu cầu (trước đây chỉ tách theo `\n---\n` hoặc dòng đầu)
+### Verified
+- `cargo test --lib` → `test result: ok. 119 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.07s` (103 cũ + 16 mới, gồm 1 test HTTP thật bằng wiremock cho retry); `cargo check` 0 lỗi (7 warning dead-code có sẵn); `cargo build` OK; `npm run build` → `✓ 2395 modules transformed` / `✓ built in 12.47s`; `npm run lint` exit 0 (do implementer chạy); Playwright `--list` OK (20 test)
+### Notes
+- Hành vi Gemini không thể xác minh offline nếu không có API key thật — người dùng cần chạy `npm run tauri:dev` để kiểm chứng end-to-end.
+- Khối xử lý mojibake giữ nguyên byte-for-byte; marker `MOJIBAKE_REPAIR_VERSION = "v3"` vẫn hoạt động.
+
+## [Unreleased] - 2026-10-18 — Onboarding provider AI theo chuẩn OpenAI Compatibility (preset + fix fetch/save models)
+### Added
+- `src/providerPresets.js` — catalog 6 preset: ChatGPT (OpenAI), Google Gemini, Anthropic Claude, DeepSeek, Muse (Meta Model API), Custom/OpenAI-compatible + helper `isDefaultLocalBase`
+- `src/App.jsx` `ProvidersPanel` — dropdown "Mẫu provider nhanh" điền sẵn base URL + model gợi ý (không ghi đè id/display name đang có); badge `● active` phản ánh provider đang dùng; nút `Đặt active` trên mỗi dòng chưa active; nút lưu đổi thành `Tạo provider`/`Cập nhật provider` (bỏ toggle Edit/Create mập mờ)
+- `src-tauri/src/providers.rs` — command `set_active_provider` (chọn provider đang dùng) + đăng ký trong `lib.rs`
+### Fixed
+- `src-tauri/src/providers.rs` — `fetch_provider_models` trước đây GET thẳng base URL (không thêm `/models`) nên Gemini/OpenAI/DeepSeek trả 404; nay dựng URL qua `models_url()` (chuẩn hoá base, bỏ các suffix endpoint đã biết) và FALLBACK về base URL gốc khi `/models` không dùng được (giữ tương thích gateway local hiện tại)
+- `src-tauri/src/providers.rs` — `parse_models_response` hỗ trợ thêm format Google `{"models":[{"name":"models/..."}]}` (tự strip tiền tố `models/`), format OpenAI `{"data":[{"id":...}]}` và mảng top-level
+- `src-tauri/src/providers.rs` — `update_provider` trước đây BỎ QUA khi danh sách models rỗng nên không thể sửa/xoá model; nay ghi kể cả mảng rỗng (qua `apply_update_fields`)
+- `src-tauri/src/providers.rs` — `create_provider` trước đây luôn ép `xoay-vong-worker-web-128k` cho mọi provider; nay chỉ ép khi base URL là gateway local mặc định
+- `src/App.jsx` — "Fetch available models" trước đây TRỘN model mới vào danh sách cũ (tích tụ model sai); nay THAY THẾ (có xác nhận khi danh sách hiện tại khác rỗng)
+- `src/App.jsx` — `load()` trước đây không set `activeId` nên badge `● active` không bao giờ hiện
+### Changed
+- `src-tauri/src/ai.rs` — dùng chung `providers::chat_completions_url()` thay vì tự cắt suffix inline (một nguồn chuẩn hoá URL cho cả generate và fetch models)
+- `e2e/providers.spec.ts` — mock có state `activeId` + case `set_active_provider` + 1 test mới; `e2e/schedule.spec.ts` thêm case phòng vệ
+### Verified
+- `cargo test --lib` 103 passed / 0 failed (91 cũ + 12 mới); `cargo check`/`cargo build` OK (7 warning dead-code có sẵn, không phát sinh cảnh báo mới); `npm run build` OK (2395 modules); `npm run lint` exit 0 (do implementer chạy; QA bị chặn bởi sandbox allowlist nên không chạy lại độc lập được); Playwright `--list` parse OK (8 test providers). Chạy e2e runtime cần cửa sổ Tauri (`npm run tauri:dev`) → chưa xác minh.
+### Notes
+- Provider luôn dùng `protocol = openai-completions` (Gemini/Claude/DeepSeek/OpenAI đều hỗ trợ chuẩn này); chưa expose UI chọn protocol.
+- "muse" = preset Muse (Meta Model API): base URL https://api.meta.ai/v1, chuẩn OpenAI-compatible (chat/completions), Bearer `MODEL_API_KEY`; model gợi ý muse-spark-1.3 / muse-spark-1.1 (tham khảo).
+- Model gợi ý trong preset chỉ mang tính tham khảo; nút "Fetch available models" là nguồn chân lý.
+- Base URL nhập ở dạng nào cũng được (`https://api.deepseek.com` hay `.../v1`, có/không `/chat/completions`) vì cả generate và fetch models dùng chung một hàm chuẩn hoá.
+
+## [Unreleased] - 2026-10-17 — Fix triệt để mojibake output AI (encoding)
+### Fixed
+- `src-tauri/src/ai.rs` — thay `String::from_utf8_lossy` (tạo U+FFFD, phá byte) bằng `decode_response_bytes` không mất dữ liệu: UTF-8 nghiêm ngặt, fallback giải mã CP1252 (byte→char)
+- `src-tauri/src/ai.rs` — viết lại `repair_mojibake` theo segment-wise: mỗi đoạn ký tự map-được CP1252 được giải mã độc lập; ký tự không map được (U+FFFD, emoji, chữ Việt đúng) đi xuyên qua và KHÔNG chặn việc phục hồi các đoạn lân cận (trước đây guard all-or-nothing khiến 1 ký tự lỗi khoá toàn bộ tiêu đề + thân bài)
+- `src-tauri/src/ai.rs` — `repair_mojibake` lặp tối đa 2 lượt (`MOJIBAKE_MAX_PASSES`) để xử lý double-encoding; idempotent, không đổi văn bản Việt/ASCII đúng
+- `src-tauri/src/content.rs` — `read_content_index` phục hồi mojibake khi ĐỌC (in-memory, KHÔNG ghi lại file) để bài viết cũ trong Kho nội dung hiển thị đúng
+### Added
+- `src-tauri/src/ai.rs` — marker `MOJIBAKE_REPAIR_VERSION = "v2"` + log khởi động trong `lib.rs run()` và log mỗi lần `generate_content` (chứng minh build mới đang chạy)
+- `src-tauri/src/ai.rs` — chẩn đoán `looks_like_mojibake` + `log_mojibake_preview` (giới hạn 64 byte hex, chỉ in khi còn mojibake sau khi sửa; không in prompt/header/key)
+- `src-tauri/src/ai.rs` — 9 test mới (round-trip, segment quanh U+FFFD, idempotent, double-layer, decode UTF-8/CP1252, pipeline decode→repair)
+### Verified
+- `cargo test --lib` 85 passed / 0 failed (76 cũ + 9 mới); `cargo check` 0 errors; `npm run build` OK. `npm run lint` bị chặn bởi quyền sandbox trong phiên QA (diff thuần Rust nên không ảnh hưởng ESLint). Kiểm thử GUI end-to-end với AI thật: người dùng cần rebuild và xác nhận.
+- **Round 3 (v3) — partial-run salvage**: `flush_run` giờ cứu được tiền tố UTF-8 hợp lệ dài nhất của một "run" hỏng, thay vì bỏ luôn cả run. Nguyên nhân còn sót: gateway (`127.0.0.1:20128`) giải mã UTF-8 sai sang CP1252 và biến 5 byte CP1252 không xác định (0x81/0x8D/0x8F/0x90/0x9D) trong chuỗi UTF-8 tiếng Việt thành `U+FFFD`, khiến run ngay cạnh bị cụt (dangling lead byte) và trước đây bị bỏ toàn bộ. Guard `improved` (chỉ nhận khi tiền tố chứa ký tự > U+00FF) đảm bảo văn bản Latin-1 hợp lệ (`café – test`, `Résumé – déjà vu`, `naïve façade`) không bị sửa. Marker `MOJIBAKE_REPAIR_VERSION = "v3"`. Bằng chứng: `cargo test --lib` 91 passed / 0 failed; 6 test mới dựa trên 64 byte hex thật lấy từ log app; `cargo check` 0 lỗi; chỉ `src-tauri/src/ai.rs` thay đổi.
+- **Giới hạn không thể tránh**: các ký tự mà gateway đã mất byte (hiển thị `�`) KHÔNG thể phục hồi (ví dụ `Đ` trong `ĐỒ`); phần văn bản còn lại được phục hồi đầy đủ. Khuyến nghị sửa tận gốc: cấu hình gateway/proxy trả response UTF-8 đúng.
+
 ## [Unreleased] - 2026-10-17 — Fix sửa bài viết ở Kho nội dung
 ### Fixed
 - `src/App.jsx` — lỗi `update_content missing required key payload`: bọc tham số trong `{ payload: { contentId, title, body, prompt, style, customStyle, mediaIds } }` (khớp `save_content`)

@@ -5,12 +5,23 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Manager};
 
+use crate::facebook::{GraphFailure, GraphFailureKind};
+use crate::facebook::{ALLOWED_IMAGE_MIMES, MAX_IMAGE_BYTES};
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ScheduleStatus {
+    // Wire format must stay PascalCase: frontend compares 'Scheduled',
+    // 'Published', 'Publishing'... Aliases keep older lowercase files readable.
+    #[serde(rename = "Scheduled", alias = "scheduled")]
     Scheduled,
+    #[serde(rename = "Publishing", alias = "publishing")]
+    Publishing,
+    #[serde(rename = "Published", alias = "published")]
     Published,
+    #[serde(rename = "Failed", alias = "failed")]
     Failed,
+    #[serde(rename = "Cancelled", alias = "cancelled")]
     Cancelled,
 }
 
@@ -19,6 +30,14 @@ impl Default for ScheduleStatus {
         ScheduleStatus::Scheduled
     }
 }
+
+pub const MAX_RETRIES: u32 = 3;
+pub const MAX_PUBLISHES_PER_TICK: usize = 3;
+pub const MIN_SCHEDULER_INTERVAL_SECS: u64 = 30;
+pub const PUBLISH_DELAY_MIN_MS: u64 = 2_000;
+pub const PUBLISH_DELAY_MAX_MS: u64 = 5_000;
+pub const RATE_LIMIT_BACKOFF_SECS: [u64; 4] = [60, 300, 900, 3600];
+pub const MAX_BACKOFF_SECS: u64 = 21_600;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -166,6 +185,8 @@ pub struct CreateSchedulePayload {
     pub pages: Option<Vec<String>>,
     #[serde(default)]
     pub page_id: Option<String>,
+    #[serde(default)]
+    pub allow_duplicate: bool,
 }
 
 #[tauri::command]
@@ -189,25 +210,56 @@ pub fn create_schedule(app: AppHandle, payload: CreateSchedulePayload) -> Result
     if payload.platform.trim().is_empty() {
         return Err("Vui lòng chọn nền tảng".into());
     }
+    if let Some(page_id) = payload.page_id.as_deref() {
+        crate::facebook::validate_page_id(page_id)?;
+    }
+    if let Some(pages) = payload.pages.as_ref() {
+        for page in pages {
+            crate::facebook::validate_page_id(page)?;
+        }
+    }
     let now = Utc::now();
     // Must be at least 5 minutes in future
     if payload.scheduled_at <= now + chrono::Duration::minutes(5) {
         return Err("Thời gian lên lịch phải trong tương lai (tối thiểu 5 phút)".into());
     }
     validate_content_approved(&app, &payload.content_id)?;
+    let (_body, image_paths) = read_content_with_media(&app, &payload.content_id)?;
+    crate::facebook::validate_image_count(image_paths.len())?;
 
+    let config = read_scheduler_config(&app)?;
     let mut items = read_schedule_index(&app)?;
 
+    let content_id = payload.content_id.trim().to_string();
     let pages = payload.pages.unwrap_or_default();
     let resolved_page_id = payload
         .page_id
         .clone()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .or_else(|| pages.first().cloned());
+        .or_else(|| {
+            config
+                .selected_page_id
+                .clone()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .or_else(|| {
+            pages
+                .first()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        });
+    if !payload.allow_duplicate {
+        if let Some(page) = resolved_page_id.as_deref() {
+            if find_duplicate(&items, &config, &content_id, page).is_some() {
+                return Err("Lịch đăng trùng: nội dung này đã có lịch cho cùng trang.".into());
+            }
+        }
+    }
     let item = ScheduleItem {
         id: uuid::Uuid::new_v4().to_string(),
-        content_id: payload.content_id.trim().to_string(),
+        content_id,
         scheduled_at: payload.scheduled_at,
         platform: payload.platform.trim().to_string(),
         pages: pages.clone(),
@@ -226,11 +278,14 @@ pub fn create_schedule(app: AppHandle, payload: CreateSchedulePayload) -> Result
 #[tauri::command]
 pub fn delete_schedule(app: AppHandle, id: String) -> Result<(), String> {
     let mut items = read_schedule_index(&app)?;
-    let len_before = items.len();
-    items.retain(|s| s.id != id);
-    if items.len() == len_before {
-        return Err(format!("Không tìm thấy lịch {}", id));
+    let target = items
+        .iter()
+        .find(|s| s.id == id)
+        .ok_or_else(|| format!("Không tìm thấy lịch {}", id))?;
+    if target.status == ScheduleStatus::Publishing {
+        return Err("Mục đang đăng, không thể xóa.".into());
     }
+    items.retain(|s| s.id != id);
     write_schedule_index(&app, &items)
 }
 
@@ -240,11 +295,17 @@ pub fn update_schedule_status(
     id: String,
     status: ScheduleStatus,
 ) -> Result<ScheduleItem, String> {
+    if status == ScheduleStatus::Publishing {
+        return Err("Không thể đặt trạng thái Publishing thủ công.".into());
+    }
     let mut items = read_schedule_index(&app)?;
     let pos = items
         .iter()
         .position(|s| s.id == id)
         .ok_or_else(|| format!("Không tìm thấy {}", id))?;
+    if items[pos].status == ScheduleStatus::Publishing {
+        return Err("Mục đang đăng, không thể đổi trạng thái thủ công.".into());
+    }
     items[pos].status = status;
     items[pos].updated_at = Utc::now();
     let updated = items[pos].clone();
@@ -262,6 +323,9 @@ pub fn reschedule(app: AppHandle, id: String, scheduled_at: DateTime<Utc>) -> Re
         .iter()
         .position(|s| s.id == id)
         .ok_or_else(|| format!("Không tìm thấy {}", id))?;
+    if items[pos].status == ScheduleStatus::Publishing {
+        return Err("Mục đang đăng, không thể dời lịch.".into());
+    }
     items[pos].scheduled_at = scheduled_at;
     items[pos].updated_at = Utc::now();
     let updated = items[pos].clone();
@@ -296,15 +360,22 @@ pub async fn start_scheduler(app: AppHandle) -> Result<(), String> {
     config.enabled = true;
     write_scheduler_config(&app, &config)?;
 
-    // Dedupe: nếu đã running thì không spawn thêm
+    // Dedupe: nếu đã running thì không spawn thêm (và bỏ qua recovery).
+    if SCHEDULER_RUNNING.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    // Phục hồi item kẹt Publishing từ lần chạy trước TRƯỚC khi đánh dấu running.
+    recover_stale_publishing(&app)?;
     if SCHEDULER_RUNNING.swap(true, Ordering::SeqCst) {
         return Ok(());
     }
 
     let app_handle = app.clone();
     tauri::async_runtime::spawn(async move {
-        let mut interval_secs = config.interval_seconds;
+        let mut interval_secs = config.interval_seconds.max(MIN_SCHEDULER_INTERVAL_SECS);
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut paused_until: Option<DateTime<Utc>> = None;
         loop {
             interval.tick().await;
             let current_config = match read_scheduler_config(&app_handle) {
@@ -314,17 +385,42 @@ pub async fn start_scheduler(app: AppHandle) -> Result<(), String> {
             if !current_config.enabled {
                 break;
             }
-            // Hot-reload interval nếu config đổi
-            if current_config.interval_seconds != interval_secs && current_config.interval_seconds >= 1 && current_config.interval_seconds <= 3600 {
-                interval_secs = current_config.interval_seconds;
+            // Hot-reload interval nếu config đổi (luôn tôn trọng mức tối thiểu)
+            let effective_secs = current_config
+                .interval_seconds
+                .max(MIN_SCHEDULER_INTERVAL_SECS);
+            if effective_secs != interval_secs {
+                interval_secs = effective_secs;
                 interval = tokio::time::interval(std::time::Duration::from_secs(interval_secs));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             }
-            let _ = process_due_schedules(&app_handle).await;
+            if let Some(until) = paused_until {
+                if Utc::now() < until {
+                    continue;
+                }
+                paused_until = None;
+            }
+            if let Ok(outcome) = process_due_schedules(&app_handle).await {
+                if outcome.rate_limited_until.is_some() {
+                    paused_until = outcome.rate_limited_until;
+                }
+            }
         }
         SCHEDULER_RUNNING.store(false, Ordering::SeqCst);
     });
 
     Ok(())
+}
+
+/// Chuyển mọi item đang Publishing (do app dừng giữa chừng) sang Failed.
+/// KHÔNG tự đăng lại để tránh đăng trùng.
+pub fn recover_stale_publishing(app: &AppHandle) -> Result<usize, String> {
+    let mut items = read_schedule_index(app)?;
+    let changed = recover_stale_publishing_items(&mut items, Utc::now());
+    if changed > 0 {
+        write_schedule_index(app, &items)?;
+    }
+    Ok(changed)
 }
 
 #[tauri::command]
@@ -363,82 +459,211 @@ fn retry_delay_minutes(n: u32) -> i64 {
     }
 }
 
-pub async fn process_due_schedules(app: &AppHandle) -> Result<(), String> {
+/// Khoảng nghỉ giữa 2 lần đăng trong cùng tick: 2000..=5000ms.
+fn publish_delay_ms(seq: u64) -> u64 {
+    (PUBLISH_DELAY_MIN_MS + (seq % 4) * 1000).min(PUBLISH_DELAY_MAX_MS)
+}
+
+/// Backoff rate-limit theo bảng [60, 300, 900, 3600], chặn trên MAX_BACKOFF_SECS.
+fn rate_limit_backoff_secs(retry_count: u32) -> u64 {
+    let idx = (retry_count as usize).min(RATE_LIMIT_BACKOFF_SECS.len() - 1);
+    RATE_LIMIT_BACKOFF_SECS[idx].min(MAX_BACKOFF_SECS)
+}
+
+/// Thứ tự ưu tiên: item.page_id -> config.selected_page_id -> item.pages.first().
+fn resolve_item_page(item: &ScheduleItem, config: &SchedulerConfig) -> Option<String> {
+    item.page_id
+        .clone()
+        .or_else(|| config.selected_page_id.clone())
+        .or_else(|| item.pages.first().cloned())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// Các item được chọn trong tick hiện tại: Scheduled, còn lượt retry, đã tới giờ.
+/// Sắp xếp (scheduled_at, id) và cắt theo cap.
+fn select_due_indices(items: &[ScheduleItem], now: DateTime<Utc>, cap: usize) -> Vec<usize> {
+    let mut indices: Vec<usize> = items
+        .iter()
+        .enumerate()
+        .filter(|(_, item)| {
+            item.status == ScheduleStatus::Scheduled
+                && item.retry_count < MAX_RETRIES
+                && item.scheduled_at <= now
+        })
+        .map(|(index, _)| index)
+        .collect();
+    indices.sort_by(|&a, &b| {
+        items[a]
+            .scheduled_at
+            .cmp(&items[b].scheduled_at)
+            .then_with(|| items[a].id.cmp(&items[b].id))
+    });
+    indices.truncate(cap);
+    indices
+}
+
+/// Tìm lịch trùng: cùng content_id, cùng page đã resolve, và còn hiệu lực
+/// (Scheduled/Publishing). Published/Failed/Cancelled không chặn.
+fn find_duplicate<'a>(
+    items: &'a [ScheduleItem],
+    config: &SchedulerConfig,
+    content_id: &str,
+    page: &str,
+) -> Option<&'a ScheduleItem> {
+    items.iter().find(|item| {
+        item.content_id == content_id
+            && matches!(
+                item.status,
+                ScheduleStatus::Scheduled | ScheduleStatus::Publishing
+            )
+            && resolve_item_page(item, config).as_deref() == Some(page)
+    })
+}
+
+/// Item kẹt Publishing khi app dừng → Failed, không auto-repost.
+pub fn recover_stale_publishing_items(items: &mut [ScheduleItem], now: DateTime<Utc>) -> usize {
+    let mut changed = 0;
+    for item in items
+        .iter_mut()
+        .filter(|item| item.status == ScheduleStatus::Publishing)
+    {
+        item.status = ScheduleStatus::Failed;
+        item.retry_count = MAX_RETRIES;
+        item.last_error = Some(
+            "Ứng dụng đã dừng khi đang đăng. Không tự đăng lại để tránh trùng; kiểm tra Facebook rồi thử lại thủ công."
+                .to_string(),
+        );
+        item.updated_at = now;
+        changed += 1;
+    }
+    changed
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FailureAction {
+    Retry,
+    StopTick,
+    Terminal,
+}
+
+/// Áp dụng chính sách lỗi lên item. Pure để unit-test được.
+fn apply_failure(
+    item: &mut ScheduleItem,
+    failure: &GraphFailure,
+    now: DateTime<Utc>,
+) -> FailureAction {
+    item.last_error = Some(failure.message.clone());
+    item.updated_at = now;
+    match failure.kind {
+        GraphFailureKind::TokenInvalid | GraphFailureKind::InvalidParam => {
+            item.status = ScheduleStatus::Failed;
+            item.retry_count = MAX_RETRIES;
+            FailureAction::Terminal
+        }
+        GraphFailureKind::RateLimited => {
+            let previous_retry_count = item.retry_count;
+            item.retry_count = previous_retry_count.saturating_add(1);
+            let backoff = failure
+                .retry_after_secs
+                .unwrap_or(0)
+                .max(rate_limit_backoff_secs(previous_retry_count))
+                .min(MAX_BACKOFF_SECS);
+            if item.retry_count >= MAX_RETRIES {
+                item.status = ScheduleStatus::Failed;
+                FailureAction::Terminal
+            } else {
+                item.status = ScheduleStatus::Scheduled;
+                item.scheduled_at = now + chrono::Duration::seconds(backoff as i64);
+                FailureAction::StopTick
+            }
+        }
+        GraphFailureKind::Network | GraphFailureKind::Other => {
+            item.retry_count = item.retry_count.saturating_add(1);
+            if item.retry_count >= MAX_RETRIES {
+                item.status = ScheduleStatus::Failed;
+                FailureAction::Terminal
+            } else {
+                item.status = ScheduleStatus::Scheduled;
+                item.scheduled_at =
+                    now + chrono::Duration::minutes(retry_delay_minutes(item.retry_count));
+                FailureAction::Retry
+            }
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct TickOutcome {
+    pub attempted: usize,
+    pub rate_limited_until: Option<DateTime<Utc>>,
+}
+
+pub async fn process_due_schedules(app: &AppHandle) -> Result<TickOutcome, String> {
     let config = read_scheduler_config(app).unwrap_or_default();
     let mut items = read_schedule_index(app)?;
+    let mut outcome = TickOutcome::default();
     let now = Utc::now();
-    let mut changed = false;
-    for i in 0..items.len() {
-        if items[i].status != ScheduleStatus::Scheduled {
-            continue;
+    let indices = select_due_indices(&items, now, MAX_PUBLISHES_PER_TICK);
+    for (seq, i) in indices.into_iter().enumerate() {
+        // Nghỉ giữa các lần đăng, không nghỉ trước lần đầu.
+        if seq > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(publish_delay_ms(
+                seq as u64,
+            )))
+            .await;
         }
-        if items[i].retry_count >= 3 {
-            continue;
+        let now = Utc::now();
+        // Đánh dấu Publishing và ghi NGAY để lần khởi động sau biết item đang dở.
+        items[i].status = ScheduleStatus::Publishing;
+        items[i].updated_at = now;
+        items[i].last_error = None;
+        if let Err(e) = write_schedule_index(app, &items) {
+            items[i].status = ScheduleStatus::Scheduled;
+            return Err(e);
         }
-        if items[i].scheduled_at > now {
-            continue;
-        }
-        // Phân giải page_id: item.page_id -> config.selected_page_id -> pages.first()
-        let resolved_page_id = items[i]
-            .page_id
-            .clone()
-            .or_else(|| config.selected_page_id.clone())
-            .or_else(|| items[i].pages.first().cloned())
-            .unwrap_or_default();
-        if resolved_page_id.trim().is_empty() {
-            items[i].last_error = Some("Thiếu page_id để đăng bài".into());
-            items[i].retry_count += 1;
-            if items[i].retry_count >= 3 {
-                items[i].status = ScheduleStatus::Failed;
-            } else {
-                items[i].scheduled_at = now + chrono::Duration::minutes(retry_delay_minutes(items[i].retry_count));
-            }
-            items[i].updated_at = now;
-            changed = true;
-            continue;
-        }
-        // Lấy nội dung body + ảnh đầu (fallback đăng text nếu ảnh lỗi)
-        let (content_body, first_image) = match read_content_with_media(app, &items[i].content_id) {
-            Ok((b, img)) => (b, img),
+        outcome.attempted += 1;
+
+        let (content_body, image_paths) = match read_content_with_media(app, &items[i].content_id) {
+            Ok((body, paths)) => (body, paths),
             Err(e) => {
-                items[i].last_error = Some(e);
-                items[i].retry_count += 1;
-                if items[i].retry_count >= 3 {
-                    items[i].status = ScheduleStatus::Failed;
-                } else {
-                    items[i].scheduled_at = now + chrono::Duration::minutes(retry_delay_minutes(items[i].retry_count));
-                }
-                items[i].updated_at = now;
-                changed = true;
+                let failure = GraphFailure::local(GraphFailureKind::Other, e);
+                apply_failure(&mut items[i], &failure, now);
+                write_schedule_index(app, &items)?;
                 continue;
             }
         };
-        // Gọi publish (gửi ảnh đầu nếu có, fallback text nếu ảnh không hợp lệ đã được resolve trả None)
-        let res = crate::facebook::publish_content(app.clone(), resolved_page_id.clone(), content_body, first_image).await;
+        let resolved_page_id = resolve_item_page(&items[i], &config).unwrap_or_default();
+        let res = crate::facebook::publish_content_classified_multi(
+            app.clone(),
+            resolved_page_id,
+            content_body,
+            image_paths,
+        )
+        .await;
         match res {
             Ok(_) => {
                 items[i].status = ScheduleStatus::Published;
                 items[i].last_error = None;
                 items[i].updated_at = now;
-                changed = true;
+                write_schedule_index(app, &items)?;
             }
-            Err(e) => {
-                items[i].retry_count += 1;
-                items[i].last_error = Some(e);
-                if items[i].retry_count >= 3 {
-                    items[i].status = ScheduleStatus::Failed;
+            Err(failure) => {
+                let action = apply_failure(&mut items[i], &failure, now);
+                let paused_until = if action == FailureAction::StopTick {
+                    Some(items[i].scheduled_at)
                 } else {
-                    items[i].scheduled_at = now + chrono::Duration::minutes(retry_delay_minutes(items[i].retry_count));
+                    None
+                };
+                write_schedule_index(app, &items)?;
+                if let Some(until) = paused_until {
+                    outcome.rate_limited_until = Some(until);
+                    break;
                 }
-                items[i].updated_at = now;
-                changed = true;
             }
         }
     }
-    if changed {
-        write_schedule_index(app, &items)?;
-    }
-    Ok(())
+    Ok(outcome)
 }
 
 #[allow(dead_code)]
@@ -462,52 +687,81 @@ fn read_content_body(app: &AppHandle, content_id: &str) -> Result<String, String
     Ok(crate::content::compose_facebook_post(&found.title, &found.body))
 }
 
-fn resolve_first_image_path(app: &AppHandle, media_ids: &[String]) -> Option<String> {
-    if media_ids.is_empty() {
-        return None;
-    }
-    let first_id = media_ids[0].trim();
-    if first_id.is_empty() {
-        return None;
-    }
-    // Read media-index.json (duplicate logic from lib.rs to avoid private access)
-    let media_path = match app.path().app_data_dir() {
-        Ok(d) => d.join("media").join("media-index.json"),
-        Err(_) => return None,
-    };
-    if !media_path.exists() {
-        return None;
-    }
-    let contents = std::fs::read_to_string(&media_path).ok()?;
-    if contents.trim().is_empty() {
-        return None;
-    }
-    // Parse as generic Value to avoid private MediaItem struct
-    let items: Vec<serde_json::Value> = serde_json::from_str(&contents).ok()?;
-    let found = items.iter().find(|v| v.get("id").and_then(|id| id.as_str()) == Some(first_id))?;
-    let path = found.get("path").and_then(|p| p.as_str())?;
-    let media_type = found.get("mediaType").and_then(|t| t.as_str()).unwrap_or("image");
-    if media_type != "image" {
-        return None;
-    }
-    let p = std::path::Path::new(path);
-    if !p.exists() {
-        return None;
-    }
-    // Pre-flight like facebook.rs: size <=10MB and mime whitelist
-    if let Ok(meta) = std::fs::metadata(p) {
-        if meta.len() > 10 * 1024 * 1024 {
-            return None;
-        }
-    }
-    let mime = mime_guess::from_path(p).first_or_octet_stream().to_string();
-    if !["image/jpeg", "image/png", "image/webp", "image/gif"].contains(&mime.as_str()) {
-        return None;
-    }
-    Some(path.to_string())
+#[derive(Debug, Clone)]
+pub(crate) struct ImageCandidate {
+    pub path: String,
+    pub is_image: bool,
+    pub exists: bool,
+    pub size_bytes: Option<u64>,
 }
 
-fn read_content_with_media(app: &AppHandle, content_id: &str) -> Result<(String, Option<String>), String> {
+/// Giữ các ứng viên đủ điều kiện đăng, đúng thứ tự đầu vào. Không cắt theo cap:
+/// việc chặn quá 10 ảnh do `facebook::validate_image_count` quyết định.
+pub(crate) fn select_publishable_images(candidates: &[ImageCandidate]) -> Vec<String> {
+    let mut out = Vec::new();
+    for c in candidates {
+        if !c.is_image || !c.exists {
+            continue;
+        }
+        match c.size_bytes {
+            Some(sz) if sz <= MAX_IMAGE_BYTES => {}
+            _ => continue,
+        }
+        let mime = mime_guess::from_path(&c.path)
+            .first_or_octet_stream()
+            .to_string();
+        if !ALLOWED_IMAGE_MIMES.contains(&mime.as_str()) {
+            continue;
+        }
+        out.push(c.path.clone());
+    }
+    out
+}
+
+fn resolve_publishable_image_paths(app: &AppHandle, media_ids: &[String]) -> Vec<String> {
+    if media_ids.is_empty() {
+        return Vec::new();
+    }
+    // Read media-index.json trực tiếp để không phụ thuộc module lib.rs.
+    let media_path = match app.path().app_data_dir() {
+        Ok(d) => d.join("media").join("media-index.json"),
+        Err(_) => return Vec::new(),
+    };
+    if !media_path.exists() {
+        return Vec::new();
+    }
+    let contents = match std::fs::read_to_string(&media_path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    if contents.trim().is_empty() {
+        return Vec::new();
+    }
+    let items: Vec<crate::MediaItem> = match serde_json::from_str(&contents) {
+        Ok(items) => items,
+        Err(_) => return Vec::new(),
+    };
+    let mut candidates = Vec::with_capacity(media_ids.len());
+    for id in media_ids {
+        let id = id.trim();
+        if id.is_empty() {
+            continue;
+        }
+        let item = match items.iter().find(|m| m.id == id) {
+            Some(item) => item,
+            None => continue,
+        };
+        candidates.push(ImageCandidate {
+            path: item.path.clone(),
+            is_image: item.media_type == "image",
+            exists: std::path::Path::new(&item.path).exists(),
+            size_bytes: std::fs::metadata(&item.path).ok().map(|m| m.len()),
+        });
+    }
+    select_publishable_images(&candidates)
+}
+
+fn read_content_with_media(app: &AppHandle, content_id: &str) -> Result<(String, Vec<String>), String> {
     let content_path = app
         .path()
         .app_data_dir()
@@ -524,8 +778,8 @@ fn read_content_with_media(app: &AppHandle, content_id: &str) -> Result<(String,
     let items: Vec<crate::content::ContentItem> =
         serde_json::from_str(&contents).map_err(|e| e.to_string())?;
     let found = items.into_iter().find(|c| c.id == content_id).ok_or_else(|| format!("Không tìm thấy nội dung {}", content_id))?;
-    let image_path = resolve_first_image_path(app, &found.media_ids);
-    Ok((crate::content::compose_facebook_post(&found.title, &found.body), image_path))
+    let image_paths = resolve_publishable_image_paths(app, &found.media_ids);
+    Ok((crate::content::compose_facebook_post(&found.title, &found.body), image_paths))
 }
 
 #[cfg(test)]
@@ -680,5 +934,314 @@ mod tests {
         // The command checks: if items[pos].status != ScheduleStatus::Failed → error
         assert_ne!(item.status, ScheduleStatus::Failed);
         // This confirms non-Failed items would be rejected
+    }
+
+    #[test]
+    fn test_legacy_fixture_without_optional_fields_defaults() {
+        let json = r#"[{"id":"old","contentId":"c","scheduledAt":"2026-01-01T00:00:00Z","platform":"FB","status":"Scheduled","retryCount":0,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}]"#;
+        let parsed: Vec<ScheduleItem> = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert!(parsed[0].pages.is_empty());
+        assert_eq!(parsed[0].page_id, None);
+        assert_eq!(parsed[0].last_error, None);
+        assert_eq!(parsed[0].status, ScheduleStatus::Scheduled);
+    }
+
+    #[test]
+    fn test_publishing_status_serializes_pascal_case_and_roundtrips() {
+        let mut item = sample_schedule("c1", 10);
+        item.status = ScheduleStatus::Publishing;
+        let json = serde_json::to_string(&item).unwrap();
+        assert!(json.contains("\"status\":\"Publishing\""), "json: {}", json);
+        let back: ScheduleItem = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.status, ScheduleStatus::Publishing);
+        // Alias lowercase giữ tương thích file cũ
+        assert_eq!(
+            serde_json::from_str::<ScheduleStatus>("\"publishing\"").unwrap(),
+            ScheduleStatus::Publishing
+        );
+    }
+
+    #[test]
+    fn test_recover_stale_publishing_items_marks_failed_once() {
+        let now = Utc::now();
+        let mut stuck = sample_schedule("c1", -5);
+        stuck.status = ScheduleStatus::Publishing;
+        stuck.retry_count = 0;
+        let untouched = sample_schedule("c2", 10);
+        let mut items = vec![stuck, untouched];
+        assert_eq!(recover_stale_publishing_items(&mut items, now), 1);
+        assert_eq!(items[0].status, ScheduleStatus::Failed);
+        assert_eq!(items[0].retry_count, MAX_RETRIES);
+        assert!(items[0]
+            .last_error
+            .as_deref()
+            .unwrap()
+            .contains("Không tự đăng lại"));
+        assert_eq!(items[0].updated_at, now);
+        assert_eq!(items[1].status, ScheduleStatus::Scheduled);
+        // Chạy lần hai không đổi gì
+        assert_eq!(recover_stale_publishing_items(&mut items, now), 0);
+        assert_eq!(items[0].status, ScheduleStatus::Failed);
+    }
+
+    #[test]
+    fn test_publish_delay_ms_range() {
+        for seq in 0..=7u64 {
+            let delay = publish_delay_ms(seq);
+            assert!(
+                delay >= PUBLISH_DELAY_MIN_MS && delay <= PUBLISH_DELAY_MAX_MS,
+                "seq {} -> {}",
+                seq,
+                delay
+            );
+        }
+        assert_eq!(publish_delay_ms(0), 2_000);
+        assert_eq!(publish_delay_ms(4), 2_000);
+        assert_eq!(publish_delay_ms(3), 5_000);
+    }
+
+    #[test]
+    fn test_rate_limit_backoff_table() {
+        let expected = [60, 300, 900, 3600, 3600, 3600, 3600, 3600, 3600, 3600];
+        for (n, want) in expected.iter().enumerate() {
+            assert_eq!(rate_limit_backoff_secs(n as u32), *want, "retry {}", n);
+        }
+        assert_eq!(rate_limit_backoff_secs(999), 3600);
+    }
+
+    fn failure(
+        kind: GraphFailureKind,
+        message: &str,
+        retry_after_secs: Option<u64>,
+    ) -> GraphFailure {
+        GraphFailure {
+            kind,
+            http_status: 0,
+            code: None,
+            retry_after_secs,
+            message: message.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_apply_failure_token_invalid_is_terminal() {
+        let now = Utc::now();
+        let mut item = sample_schedule("c1", -1);
+        let action = apply_failure(
+            &mut item,
+            &failure(GraphFailureKind::TokenInvalid, "token hết hạn", None),
+            now,
+        );
+        assert_eq!(action, FailureAction::Terminal);
+        assert_eq!(item.status, ScheduleStatus::Failed);
+        assert_eq!(item.retry_count, MAX_RETRIES);
+        assert_eq!(item.last_error.as_deref(), Some("token hết hạn"));
+        assert_eq!(item.updated_at, now);
+    }
+
+    #[test]
+    fn test_apply_failure_invalid_param_is_terminal() {
+        let now = Utc::now();
+        let mut item = sample_schedule("c1", -1);
+        let action = apply_failure(
+            &mut item,
+            &failure(GraphFailureKind::InvalidParam, "tham số sai", None),
+            now,
+        );
+        assert_eq!(action, FailureAction::Terminal);
+        assert_eq!(item.status, ScheduleStatus::Failed);
+        assert_eq!(item.retry_count, MAX_RETRIES);
+    }
+
+    #[test]
+    fn test_apply_failure_rate_limited_first_is_stop_tick() {
+        let now = Utc::now();
+        let mut item = sample_schedule("c1", -1);
+        item.retry_count = 0;
+        let action = apply_failure(
+            &mut item,
+            &failure(GraphFailureKind::RateLimited, "rate limit", None),
+            now,
+        );
+        assert_eq!(action, FailureAction::StopTick);
+        assert_eq!(item.status, ScheduleStatus::Scheduled);
+        assert_eq!(item.retry_count, 1);
+        assert_eq!(item.scheduled_at, now + chrono::Duration::seconds(60));
+    }
+
+    #[test]
+    fn test_apply_failure_rate_limited_honours_retry_after_and_cap() {
+        let now = Utc::now();
+        let mut item = sample_schedule("c1", -1);
+        let action = apply_failure(
+            &mut item,
+            &failure(GraphFailureKind::RateLimited, "rate limit", Some(999_999)),
+            now,
+        );
+        assert_eq!(action, FailureAction::StopTick);
+        assert_eq!(
+            item.scheduled_at,
+            now + chrono::Duration::seconds(MAX_BACKOFF_SECS as i64)
+        );
+    }
+
+    #[test]
+    fn test_apply_failure_rate_limited_exhausted_is_terminal() {
+        let now = Utc::now();
+        let mut item = sample_schedule("c1", -1);
+        item.retry_count = MAX_RETRIES - 1;
+        let action = apply_failure(
+            &mut item,
+            &failure(GraphFailureKind::RateLimited, "rate limit", Some(120)),
+            now,
+        );
+        assert_eq!(action, FailureAction::Terminal);
+        assert_eq!(item.status, ScheduleStatus::Failed);
+        assert_eq!(item.retry_count, MAX_RETRIES);
+    }
+
+    #[test]
+    fn test_apply_failure_network_retries_with_delay() {
+        let now = Utc::now();
+        let mut item = sample_schedule("c1", -1);
+        let action = apply_failure(
+            &mut item,
+            &failure(GraphFailureKind::Network, "mất kết nối", None),
+            now,
+        );
+        assert_eq!(action, FailureAction::Retry);
+        assert_eq!(item.status, ScheduleStatus::Scheduled);
+        assert_eq!(item.retry_count, 1);
+        assert_eq!(item.scheduled_at, now + chrono::Duration::minutes(5));
+    }
+
+    #[test]
+    fn test_find_duplicate_scopes_by_content_page_and_status() {
+        let config = SchedulerConfig::default();
+
+        let scheduled = sample_schedule("c1", 10);
+        assert!(find_duplicate(&[scheduled], &config, "c1", "page1").is_some());
+
+        let mut publishing = sample_schedule("c1", 10);
+        publishing.status = ScheduleStatus::Publishing;
+        assert!(find_duplicate(&[publishing], &config, "c1", "page1").is_some());
+
+        let mut published = sample_schedule("c1", 10);
+        published.status = ScheduleStatus::Published;
+        assert!(find_duplicate(&[published], &config, "c1", "page1").is_none());
+
+        let mut other_page = sample_schedule("c1", 10);
+        other_page.page_id = Some("page2".into());
+        other_page.pages = vec!["page2".into()];
+        assert!(find_duplicate(&[other_page], &config, "c1", "page1").is_none());
+    }
+
+    #[test]
+    fn test_resolve_item_page_precedence() {
+        let mut config = SchedulerConfig::default();
+        config.selected_page_id = Some("config_page".into());
+        let mut item = sample_schedule("c1", 10);
+        item.page_id = None;
+        item.pages = vec!["pages_first".into()];
+        assert_eq!(
+            resolve_item_page(&item, &config).as_deref(),
+            Some("config_page")
+        );
+        item.page_id = Some("item_page".into());
+        assert_eq!(
+            resolve_item_page(&item, &config).as_deref(),
+            Some("item_page")
+        );
+        config.selected_page_id = None;
+        item.page_id = None;
+        assert_eq!(
+            resolve_item_page(&item, &config).as_deref(),
+            Some("pages_first")
+        );
+        item.pages.clear();
+        assert_eq!(resolve_item_page(&item, &config), None);
+    }
+
+    #[test]
+    fn test_select_due_indices_caps_sorts_and_filters() {
+        let now = Utc::now();
+        let base = now - chrono::Duration::minutes(30);
+        let mut items = Vec::new();
+        for k in 0..10i64 {
+            let mut item = sample_schedule(&format!("c{}", k), -30);
+            item.id = format!("id{:02}", 9 - k);
+            item.scheduled_at = base + chrono::Duration::seconds(k);
+            items.push(item);
+        }
+        let mut exhausted = sample_schedule("exhausted", -60);
+        exhausted.id = "a_exhausted".into();
+        exhausted.retry_count = MAX_RETRIES;
+        items.push(exhausted);
+        let mut future = sample_schedule("future", 30);
+        future.id = "a_future".into();
+        items.push(future);
+
+        let indices = select_due_indices(&items, now, MAX_PUBLISHES_PER_TICK);
+        assert_eq!(indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn test_select_due_indices_tie_breaks_by_id() {
+        let now = Utc::now();
+        let at = now - chrono::Duration::minutes(1);
+        let mut items = Vec::new();
+        for id in ["b", "a", "c"] {
+            let mut item = sample_schedule("c1", -1);
+            item.id = id.to_string();
+            item.scheduled_at = at;
+            items.push(item);
+        }
+        assert_eq!(select_due_indices(&items, now, 3), vec![1, 0, 2]);
+    }
+
+    fn candidate(path: &str, is_image: bool, exists: bool, size_bytes: Option<u64>) -> ImageCandidate {
+        ImageCandidate {
+            path: path.to_string(),
+            is_image,
+            exists,
+            size_bytes,
+        }
+    }
+
+    #[test]
+    fn select_publishable_images_filters_and_keeps_order() {
+        let candidates = vec![
+            candidate("video.mp4", false, true, Some(1024)),
+            candidate("missing.png", true, false, Some(1024)),
+            candidate("huge.png", true, true, Some(MAX_IMAGE_BYTES + 1)),
+            candidate("a.exe", true, true, Some(1024)),
+            candidate("ok1.png", true, true, Some(1024)),
+            candidate("ok2.jpg", true, true, Some(2048)),
+        ];
+        assert_eq!(
+            select_publishable_images(&candidates),
+            vec!["ok1.png".to_string(), "ok2.jpg".to_string()]
+        );
+    }
+
+    #[test]
+    fn select_publishable_images_empty_when_none_usable() {
+        let candidates = vec![
+            candidate("video.mp4", false, true, Some(1024)),
+            candidate("missing.png", true, false, Some(1024)),
+            candidate("huge.png", true, true, Some(MAX_IMAGE_BYTES + 1)),
+            candidate("a.exe", true, true, Some(1024)),
+            candidate("no-size.png", true, true, None),
+        ];
+        assert!(select_publishable_images(&candidates).is_empty());
+    }
+
+    #[test]
+    fn select_publishable_images_does_not_truncate() {
+        let candidates: Vec<ImageCandidate> = (0..12)
+            .map(|i| candidate(&format!("ok{}.png", i), true, true, Some(1024)))
+            .collect();
+        assert_eq!(select_publishable_images(&candidates).len(), 12);
     }
 }

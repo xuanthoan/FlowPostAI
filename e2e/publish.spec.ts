@@ -22,12 +22,17 @@ window.__TAURI_MOCK_IMPL__ = async (cmd, args) => {
     case 'publish_content': {
       const pid = (args?.page_id || '').trim();
       const msg = (args?.message || '').trim();
-      const img = args?.image_path;
+      const imgs = Array.isArray(args?.image_paths)
+        ? args.image_paths
+        : (args?.image_path ? [args.image_path] : []);
       if (!pid) throw new Error('Thiếu pageId');
       if (!msg) throw new Error('Vui lòng nhập nội dung');
-      if (img && String(img).endsWith('.exe')) throw new Error('Định dạng ảnh không hỗ trợ (chỉ jpg/jpeg/png/webp/gif)');
-      if (img && String(img).includes('notfound')) throw new Error('Không tìm thấy tệp ảnh');
-      return { id: 'mock_post_123' };
+      if (imgs.length > 10) throw new Error('Chỉ đăng tối đa 10 ảnh mỗi bài');
+      for (const p of imgs) {
+        if (String(p).endsWith('.exe')) throw new Error('Định dạng ảnh không hỗ trợ (chỉ jpg/jpeg/png/webp/gif)');
+        if (String(p).includes('notfound')) throw new Error('Không tìm thấy tệp ảnh');
+      }
+      return { id: 'mock_post_123', imageCount: imgs.length, imagePaths: imgs };
     }
     case 'get_scheduler_config':
       return { intervalSeconds: 30, enabled: true, selectedPageId: null };
@@ -80,5 +85,27 @@ test.describe('Publish E2E (mock)', () => {
     expect(Array.isArray(list)).toBe(true);
     expect(list.length).toBe(2);
     expect(list[0].id).toBe('111');
+  });
+
+  test('publish_content with 2 images should succeed', async ({ page }) => {
+    const res: any = await invoke(page, 'publish_content', {
+      page_id: '111', message: 'album',
+      image_path: 'C:\\tmp\\a.png',
+      image_paths: ['C:\\tmp\\a.png', 'C:\\tmp\\b.jpg'],
+    });
+    expect(res.id).toBe('mock_post_123');
+    expect(res.imageCount).toBe(2);
+  });
+
+  test('publish_content with 11 images should fail', async ({ page }) => {
+    try {
+      await invoke(page, 'publish_content', {
+        page_id: '111', message: 'too many', image_path: null,
+        image_paths: Array.from({ length: 11 }, (_, i) => `C:\\tmp\\${i}.png`),
+      });
+      throw new Error('should have failed');
+    } catch (e) {
+      expect(String(e)).toContain('tối đa 10');
+    }
   });
 });
