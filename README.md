@@ -1,6 +1,6 @@
 # FlowPost AI Desktop
 
-[![CI](https://github.com/xuanthoan/auto_creat_content_public_fb/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/xuanthoan/auto_creat_content_public_fb/actions/workflows/ci.yml)
+[![CI](https://github.com/xuanthoan/FlowPostAI/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/xuanthoan/FlowPostAI/actions/workflows/ci.yml)
 
 FlowPost AI là ứng dụng desktop React + Tauri để chuẩn bị nội dung Facebook. Bản hiện tại bao gồm dashboard và kho media lưu trực tiếp trên ổ cứng; media không được tải lên máy chủ bên thứ ba.
 
